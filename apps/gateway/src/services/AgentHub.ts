@@ -2,6 +2,7 @@ import type { ServerWebSocket } from "bun";
 import { and, desc, eq, isNull, lt } from "drizzle-orm";
 import { db, schema } from "../db";
 import { getPlatformAdapter } from "../platforms";
+import { getBusinessById, resolveAdapterForBusiness } from "./BusinessRegistry";
 
 interface AgentSocketData {
   agent_id?: string;
@@ -10,6 +11,8 @@ interface AgentSocketData {
 interface AgentRegistrationPayload {
   agent_id?: string;
   agent_name?: string;
+  /** Business this agent is scoped to. Undefined = "super agent" (sees/acts on every business). */
+  business_id?: string;
 }
 
 export interface AgentHistoryEntry {
@@ -29,6 +32,7 @@ export interface AgentHistoryPage {
 export interface EscalatedChatSummary {
   messenger_id: string;
   platform: string;
+  business_id: string;
   display_name: string;
   escalation_status: "queued" | "claimed";
   claimed_by_agent_id: string | null;
@@ -42,6 +46,8 @@ export interface EscalatedChatSummary {
 interface AgentConnection {
   agent_id: string;
   agent_name: string;
+  /** Undefined = super agent (sees/acts on every business). */
+  business_id?: string;
   ws: ServerWebSocket<AgentSocketData>;
   connected_at: string;
 }
@@ -62,13 +68,14 @@ export class AgentHub {
   registerAgent(
     ws: ServerWebSocket<AgentSocketData>,
     payload: AgentRegistrationPayload
-  ): { agent_id: string; agent_name: string } {
+  ): { agent_id: string; agent_name: string; business_id?: string } {
     let agent_id = payload.agent_id?.trim();
     if (!agent_id) {
       agent_id = this.generateAgentId();
     }
 
     const agent_name = payload.agent_name?.trim() || agent_id;
+    const business_id = payload.business_id?.trim() || undefined;
 
     const existing = this.agents.get(agent_id);
     if (existing) {
@@ -91,6 +98,7 @@ export class AgentHub {
     this.agents.set(agent_id, {
       agent_id,
       agent_name,
+      business_id,
       ws,
       connected_at: new Date().toISOString()
     });
@@ -99,12 +107,13 @@ export class AgentHub {
       type: "registered",
       agent_id,
       agent_name,
+      business_id: business_id ?? null,
       connected_agents: this.getConnectedAgentCount()
     });
 
     this.broadcastPresence();
 
-    return { agent_id, agent_name };
+    return { agent_id, agent_name, business_id };
   }
 
   unregisterSocket(ws: ServerWebSocket<AgentSocketData>): void {
@@ -116,42 +125,63 @@ export class AgentHub {
     }
   }
 
-  hasConnectedAgents(): boolean {
-    return this.agents.size > 0;
+  /** Whether any agent is online who could handle this business's chats (a super agent, or one scoped to it). */
+  hasConnectedAgents(business_id?: string): boolean {
+    if (!business_id) return this.agents.size > 0;
+
+    for (const connection of this.agents.values()) {
+      if (connection.business_id === undefined || connection.business_id === business_id) {
+        return true;
+      }
+    }
+    return false;
   }
 
   getConnectedAgentCount(): number {
     return this.agents.size;
   }
 
-  async getEscalatedQueue(): Promise<EscalatedChatSummary[]> {
-    return await this.getEscalatedChats();
+  /** True if this agent (super agent, or one scoped to business_id) may act on that business's chats. */
+  private isAuthorizedForBusiness(agent_id: string, business_id: string): boolean {
+    const connection = this.agents.get(agent_id);
+    if (!connection) return false;
+    return connection.business_id === undefined || connection.business_id === business_id;
+  }
+
+  async getEscalatedQueue(business_id?: string): Promise<EscalatedChatSummary[]> {
+    return await this.getEscalatedChats(business_id);
   }
 
   async sendQueueSnapshotToAgent(agent_id: string): Promise<void> {
-    const ws = this.getAgentSocket(agent_id);
-    if (!ws) return;
+    const connection = this.agents.get(agent_id);
+    if (!connection) return;
 
-    const chats = await this.getEscalatedChats();
-    this.sendRaw(ws, {
+    const chats = await this.getEscalatedChats(connection.business_id);
+    this.sendRaw(connection.ws, {
       type: "queue_snapshot",
       chats
     });
   }
 
+  /**
+   * Send every connected agent their own filtered queue snapshot — super agents see
+   * every business's escalated chats, scoped agents only see their own business's.
+   */
   async broadcastQueueSnapshot(): Promise<void> {
-    const chats = await this.getEscalatedChats();
-
-    this.broadcast({
-      type: "queue_snapshot",
-      chats
-    });
+    for (const connection of this.agents.values()) {
+      const chats = await this.getEscalatedChats(connection.business_id);
+      this.sendRaw(connection.ws, {
+        type: "queue_snapshot",
+        chats
+      });
+    }
   }
 
   async claimChat(
     agent_id: string,
     platform: string,
-    messenger_id: string
+    messenger_id: string,
+    business_id?: string
   ): Promise<{
     success: boolean;
     error?: string;
@@ -160,6 +190,11 @@ export class AgentHub {
     has_more?: boolean;
   }> {
     const normalizedPlatform = platform.toLowerCase();
+    const targetBusinessId = business_id || "biz_default";
+
+    if (!this.isAuthorizedForBusiness(agent_id, targetBusinessId)) {
+      return { success: false, error: "You are not authorized to act on this business's chats." };
+    }
 
     await db
       .update(schema.messengers)
@@ -173,12 +208,13 @@ export class AgentHub {
         and(
           eq(schema.messengers.platform, normalizedPlatform),
           eq(schema.messengers.messenger_id, messenger_id),
+          eq(schema.messengers.business_id, targetBusinessId),
           eq(schema.messengers.is_escalated, 1),
           isNull(schema.messengers.claimed_by_agent_id)
         )
       );
 
-    const conversation = await this.getMessenger(normalizedPlatform, messenger_id);
+    const conversation = await this.getMessenger(normalizedPlatform, messenger_id, targetBusinessId);
     if (!conversation || !conversation.is_escalated) {
       return { success: false, error: "Conversation is not escalated." };
     }
@@ -190,12 +226,13 @@ export class AgentHub {
       };
     }
 
-    const historyPage = await this.getHistory(normalizedPlatform, messenger_id, 30);
+    const historyPage = await this.getHistory(normalizedPlatform, messenger_id, 30, undefined, targetBusinessId);
 
-    this.broadcast({
+    this.broadcastToBusiness(targetBusinessId, {
       type: "chat_claimed",
       platform: normalizedPlatform,
       messenger_id,
+      business_id: targetBusinessId,
       claimed_by_agent_id: agent_id
     });
 
@@ -212,11 +249,17 @@ export class AgentHub {
   async releaseChat(
     agent_id: string,
     platform: string,
-    messenger_id: string
+    messenger_id: string,
+    business_id?: string
   ): Promise<{ success: boolean; error?: string }> {
     const normalizedPlatform = platform.toLowerCase();
+    const targetBusinessId = business_id || "biz_default";
 
-    const conversation = await this.getMessenger(normalizedPlatform, messenger_id);
+    if (!this.isAuthorizedForBusiness(agent_id, targetBusinessId)) {
+      return { success: false, error: "You are not authorized to act on this business's chats." };
+    }
+
+    const conversation = await this.getMessenger(normalizedPlatform, messenger_id, targetBusinessId);
     if (!conversation || !conversation.is_escalated) {
       return { success: false, error: "Conversation is not escalated." };
     }
@@ -238,26 +281,28 @@ export class AgentHub {
       .where(
         and(
           eq(schema.messengers.platform, normalizedPlatform),
-          eq(schema.messengers.messenger_id, messenger_id)
+          eq(schema.messengers.messenger_id, messenger_id),
+          eq(schema.messengers.business_id, targetBusinessId)
         )
       );
 
     const deEscalationMessage = "Your conversation with customer care is complete. You can continue chatting with the AI assistant.";
-    const adapter = getPlatformAdapter(normalizedPlatform);
+    const adapter = await this.resolveAdapter(normalizedPlatform, targetBusinessId);
     if (adapter) {
       await adapter.sendMessage(messenger_id, deEscalationMessage);
     }
 
-    await this.saveAssistantMessage(normalizedPlatform, messenger_id, deEscalationMessage, {
+    await this.saveAssistantMessage(normalizedPlatform, messenger_id, targetBusinessId, deEscalationMessage, {
       from_agent: false,
       system: true,
       type: "de_escalated"
     });
 
-    this.broadcast({
+    this.broadcastToBusiness(targetBusinessId, {
       type: "chat_released",
       platform: normalizedPlatform,
       messenger_id,
+      business_id: targetBusinessId,
       released_by_agent_id: agent_id
     });
 
@@ -270,16 +315,22 @@ export class AgentHub {
     agent_id: string,
     platform: string,
     messenger_id: string,
-    message: string
+    message: string,
+    business_id?: string
   ): Promise<{ success: boolean; error?: string }> {
     const normalizedPlatform = platform.toLowerCase();
+    const targetBusinessId = business_id || "biz_default";
     const trimmedMessage = message.trim();
 
     if (!trimmedMessage) {
       return { success: false, error: "Message cannot be empty." };
     }
 
-    const conversation = await this.getMessenger(normalizedPlatform, messenger_id);
+    if (!this.isAuthorizedForBusiness(agent_id, targetBusinessId)) {
+      return { success: false, error: "You are not authorized to act on this business's chats." };
+    }
+
+    const conversation = await this.getMessenger(normalizedPlatform, messenger_id, targetBusinessId);
     if (!conversation || !conversation.is_escalated) {
       return { success: false, error: "Conversation is not escalated." };
     }
@@ -288,7 +339,7 @@ export class AgentHub {
       return { success: false, error: "You can only send messages to chats you have claimed." };
     }
 
-    const adapter = getPlatformAdapter(normalizedPlatform);
+    const adapter = await this.resolveAdapter(normalizedPlatform, targetBusinessId);
     if (!adapter) {
       return { success: false, error: `No adapter found for platform: ${normalizedPlatform}` };
     }
@@ -300,15 +351,16 @@ export class AgentHub {
 
     const timestamp = new Date().toISOString();
 
-    await this.saveAssistantMessage(normalizedPlatform, messenger_id, trimmedMessage, {
+    await this.saveAssistantMessage(normalizedPlatform, messenger_id, targetBusinessId, trimmedMessage, {
       from_agent: true,
       agent_id
     });
 
-    this.broadcast({
+    this.broadcastToBusiness(targetBusinessId, {
       type: "chat_message",
       platform: normalizedPlatform,
       messenger_id,
+      business_id: targetBusinessId,
       from: "agent",
       text: trimmedMessage,
       agent_id,
@@ -322,9 +374,11 @@ export class AgentHub {
     platform: string,
     messenger_id: string,
     limit: number = 200,
-    cursor?: number
+    cursor?: number,
+    business_id?: string
   ): Promise<AgentHistoryPage> {
     const normalizedPlatform = platform.toLowerCase();
+    const targetBusinessId = business_id || "biz_default";
     const safeLimit = Math.max(1, Math.min(limit, 500));
     const safeCursor = typeof cursor === "number" && Number.isFinite(cursor) ? Math.floor(cursor) : null;
 
@@ -336,11 +390,13 @@ export class AgentHub {
           ? and(
               eq(schema.chatMessages.platform, normalizedPlatform),
               eq(schema.chatMessages.messenger_id, messenger_id),
+              eq(schema.chatMessages.business_id, targetBusinessId),
               lt(schema.chatMessages.id, safeCursor)
             )
           : and(
               eq(schema.chatMessages.platform, normalizedPlatform),
-              eq(schema.chatMessages.messenger_id, messenger_id)
+              eq(schema.chatMessages.messenger_id, messenger_id),
+              eq(schema.chatMessages.business_id, targetBusinessId)
             )
       )
       .orderBy(desc(schema.chatMessages.id))
@@ -370,12 +426,13 @@ export class AgentHub {
     };
   }
 
-  async notifyConversationQueued(platform: string, messenger_id: string): Promise<void> {
+  async notifyConversationQueued(platform: string, messenger_id: string, business_id?: string): Promise<void> {
     const normalizedPlatform = platform.toLowerCase();
-    const chat = await this.getEscalatedChatSummary(normalizedPlatform, messenger_id);
+    const targetBusinessId = business_id || "biz_default";
+    const chat = await this.getEscalatedChatSummary(normalizedPlatform, messenger_id, targetBusinessId);
     if (!chat) return;
 
-    this.broadcast({
+    this.broadcastToBusiness(targetBusinessId, {
       type: "chat_queued",
       chat
     });
@@ -383,11 +440,14 @@ export class AgentHub {
     await this.broadcastQueueSnapshot();
   }
 
-  async notifyConversationDeEscalated(platform: string, messenger_id: string): Promise<void> {
-    this.broadcast({
+  async notifyConversationDeEscalated(platform: string, messenger_id: string, business_id?: string): Promise<void> {
+    const targetBusinessId = business_id || "biz_default";
+
+    this.broadcastToBusiness(targetBusinessId, {
       type: "chat_released",
       platform,
       messenger_id,
+      business_id: targetBusinessId,
       released_by_agent_id: "system"
     });
 
@@ -397,18 +457,21 @@ export class AgentHub {
   async handleEscalatedUserMessage(payload: {
     platform: string;
     messenger_id: string;
+    business_id?: string;
     text: string;
     timestamp?: string;
   }): Promise<void> {
-    const conversation = await this.getMessenger(payload.platform, payload.messenger_id);
+    const targetBusinessId = payload.business_id || "biz_default";
+    const conversation = await this.getMessenger(payload.platform, payload.messenger_id, targetBusinessId);
     if (!conversation || !conversation.is_escalated) {
       return;
     }
 
-    this.broadcast({
+    this.broadcastToBusiness(targetBusinessId, {
       type: "chat_message",
       platform: payload.platform,
       messenger_id: payload.messenger_id,
+      business_id: targetBusinessId,
       from: "user",
       text: payload.text,
       timestamp: payload.timestamp || new Date().toISOString(),
@@ -418,18 +481,43 @@ export class AgentHub {
     await this.broadcastQueueSnapshot();
   }
 
-  private async getEscalatedChats(): Promise<EscalatedChatSummary[]> {
+  /**
+   * Resolve the adapter to send through for a business's escalated conversation —
+   * that business's own bot credentials, falling back to the global singleton
+   * (legacy single-tenant .env-based setup) if the business has none configured.
+   */
+  private async resolveAdapter(platform: string, business_id: string) {
+    if (business_id !== "biz_default") {
+      const business = await getBusinessById(business_id);
+      if (business) {
+        const businessAdapter = resolveAdapterForBusiness(platform, business);
+        if (businessAdapter) return businessAdapter;
+      }
+    }
+
+    return getPlatformAdapter(platform);
+  }
+
+  private async getEscalatedChats(business_id?: string): Promise<EscalatedChatSummary[]> {
     const rows = await db
       .select()
       .from(schema.messengers)
-      .where(eq(schema.messengers.is_escalated, 1))
+      .where(
+        business_id
+          ? and(eq(schema.messengers.is_escalated, 1), eq(schema.messengers.business_id, business_id))
+          : eq(schema.messengers.is_escalated, 1)
+      )
       .orderBy(desc(schema.messengers.updated_at));
 
     return rows.map((row) => this.mapMessengerToSummary(row));
   }
 
-  private async getEscalatedChatSummary(platform: string, messenger_id: string): Promise<EscalatedChatSummary | null> {
-    const row = await this.getMessenger(platform, messenger_id);
+  private async getEscalatedChatSummary(
+    platform: string,
+    messenger_id: string,
+    business_id: string
+  ): Promise<EscalatedChatSummary | null> {
+    const row = await this.getMessenger(platform, messenger_id, business_id);
     if (!row || !row.is_escalated) return null;
 
     return this.mapMessengerToSummary(row);
@@ -442,6 +530,7 @@ export class AgentHub {
     return {
       messenger_id: row.messenger_id,
       platform: row.platform,
+      business_id: row.business_id,
       display_name,
       escalation_status: row.claimed_by_agent_id ? "claimed" : "queued",
       claimed_by_agent_id: row.claimed_by_agent_id,
@@ -453,14 +542,15 @@ export class AgentHub {
     };
   }
 
-  private async getMessenger(platform: string, messenger_id: string) {
+  private async getMessenger(platform: string, messenger_id: string, business_id: string) {
     return await db
       .select()
       .from(schema.messengers)
       .where(
         and(
           eq(schema.messengers.platform, platform.toLowerCase()),
-          eq(schema.messengers.messenger_id, messenger_id)
+          eq(schema.messengers.messenger_id, messenger_id),
+          eq(schema.messengers.business_id, business_id)
         )
       )
       .then((rows) => rows[0]);
@@ -469,28 +559,18 @@ export class AgentHub {
   private async saveAssistantMessage(
     platform: string,
     messenger_id: string,
+    business_id: string,
     message: string,
     metadata: Record<string, unknown>
   ): Promise<void> {
     await db.insert(schema.chatMessages).values({
       platform,
       messenger_id,
+      business_id,
       message_text: message,
       is_from_user: false,
       metadata: JSON.stringify(metadata)
     });
-  }
-
-  private getAgentSocket(agent_id: string): ServerWebSocket<AgentSocketData> | null {
-    const connection = this.agents.get(agent_id);
-    if (!connection) return null;
-
-    if (connection.ws.readyState !== 1) {
-      this.agents.delete(agent_id);
-      return null;
-    }
-
-    return connection.ws;
   }
 
   private broadcastPresence(): void {
@@ -510,6 +590,15 @@ export class AgentHub {
   private broadcast(payload: Record<string, unknown>): void {
     for (const connection of this.agents.values()) {
       this.sendRaw(connection.ws, payload);
+    }
+  }
+
+  /** Broadcast only to agents who may see this business (super agents + agents scoped to it). */
+  private broadcastToBusiness(business_id: string, payload: Record<string, unknown>): void {
+    for (const connection of this.agents.values()) {
+      if (connection.business_id === undefined || connection.business_id === business_id) {
+        this.sendRaw(connection.ws, payload);
+      }
     }
   }
 

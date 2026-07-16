@@ -3,6 +3,8 @@ type AgentAuthMode = "none" | "static" | "jwt";
 export interface AgentAuthIdentity {
   agent_id?: string;
   agent_name?: string;
+  /** Business this agent is scoped to. Undefined = "super agent" (sees/acts on every business). */
+  business_id?: string;
   claims?: Record<string, unknown>;
 }
 
@@ -55,7 +57,8 @@ function readNumericClaim(payload: Record<string, unknown>, key: string): number
 
 export class AgentAuthService {
   private mode: AgentAuthMode;
-  private staticTokens: Set<string>;
+  /** token -> business_id (undefined = super agent, sees/acts on every business) */
+  private staticTokens: Map<string, string | undefined>;
   private jwtSecret: string;
   private jwtIssuer: string | null;
   private jwtAudience: string | null;
@@ -64,11 +67,21 @@ export class AgentAuthService {
   constructor() {
     this.mode = parseMode(process.env.AGENT_AUTH_MODE);
 
-    this.staticTokens = new Set(
+    // Format: "token1:biz_001,token2:biz_002,token3" — token3 (no colon) is a super
+    // agent with no business restriction. Kept backward compatible with the plain
+    // "token1,token2" format used before multi-tenancy existed.
+    this.staticTokens = new Map(
       (process.env.AGENT_AUTH_TOKENS || "")
         .split(",")
-        .map((token) => token.trim())
+        .map((entry) => entry.trim())
         .filter(Boolean)
+        .map((entry) => {
+          const separatorIndex = entry.indexOf(":");
+          if (separatorIndex === -1) return [entry, undefined] as const;
+          const token = entry.slice(0, separatorIndex).trim();
+          const businessId = entry.slice(separatorIndex + 1).trim() || undefined;
+          return [token, businessId] as const;
+        })
     );
 
     this.jwtSecret = process.env.AGENT_JWT_SECRET || "";
@@ -131,7 +144,7 @@ export class AgentAuthService {
       };
     }
 
-    return { success: true };
+    return { success: true, identity: { business_id: this.staticTokens.get(token) } };
   }
 
   private async authenticateJwt(token: string): Promise<AgentAuthResult> {
@@ -153,6 +166,7 @@ export class AgentAuthService {
         agent_name:
           readOptionalClaim(payload, "agent_name") ||
           readOptionalClaim(payload, "name"),
+        business_id: readOptionalClaim(payload, "business_id"),
         claims: payload
       };
 

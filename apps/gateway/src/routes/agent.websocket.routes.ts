@@ -62,7 +62,7 @@ export const agentWebsocketRoutes = new Elysia().ws("/ws/agents", {
       }
 
       if (action === "register") {
-        const payload = data as { agent_id?: string; agent_name?: string; token?: string };
+        const payload = data as { agent_id?: string; agent_name?: string; token?: string; business_id?: string };
         const authResult = await agentAuthService.authenticate(payload.token);
 
         if (!authResult.success) {
@@ -75,9 +75,17 @@ export const agentWebsocketRoutes = new Elysia().ws("/ws/agents", {
           return;
         }
 
+        // Auth modes static/jwt derive business_id from the verified token/claim (an
+        // `identity` object is always present in those modes, even if its business_id
+        // is undefined for a "super agent" token). In "none" mode no identity is ever
+        // returned, so there's no auth boundary anyway — trust the client-supplied value.
+        const business_id =
+          authResult.identity !== undefined ? authResult.identity.business_id : payload.business_id;
+
         const registration = agentHub.registerAgent(ws as any, {
           agent_id: authResult.identity?.agent_id || payload.agent_id,
-          agent_name: authResult.identity?.agent_name || payload.agent_name
+          agent_name: authResult.identity?.agent_name || payload.agent_name,
+          business_id
         });
         await agentHub.sendQueueSnapshotToAgent(registration.agent_id);
         return;
@@ -99,14 +107,14 @@ export const agentWebsocketRoutes = new Elysia().ws("/ws/agents", {
       }
 
       if (action === "claim_chat") {
-        const payload = data as { platform?: string; messenger_id?: string };
+        const payload = data as { platform?: string; messenger_id?: string; business_id?: string };
 
         if (!payload.platform || !payload.messenger_id) {
           ws.send(JSON.stringify({ type: "claim_result", success: false, error: "platform and messenger_id are required." }));
           return;
         }
 
-        const result = await agentHub.claimChat(agent_id, payload.platform, payload.messenger_id);
+        const result = await agentHub.claimChat(agent_id, payload.platform, payload.messenger_id, payload.business_id);
         ws.send(JSON.stringify({
           type: "claim_result",
           success: result.success,
@@ -122,14 +130,14 @@ export const agentWebsocketRoutes = new Elysia().ws("/ws/agents", {
       }
 
       if (action === "release_chat") {
-        const payload = data as { platform?: string; messenger_id?: string };
+        const payload = data as { platform?: string; messenger_id?: string; business_id?: string };
 
         if (!payload.platform || !payload.messenger_id) {
           ws.send(JSON.stringify({ type: "release_result", success: false, error: "platform and messenger_id are required." }));
           return;
         }
 
-        const result = await agentHub.releaseChat(agent_id, payload.platform, payload.messenger_id);
+        const result = await agentHub.releaseChat(agent_id, payload.platform, payload.messenger_id, payload.business_id);
         ws.send(JSON.stringify({
           type: "release_result",
           success: result.success,
@@ -142,14 +150,14 @@ export const agentWebsocketRoutes = new Elysia().ws("/ws/agents", {
       }
 
       if (action === "send_message") {
-        const payload = data as { platform?: string; messenger_id?: string; message?: string };
+        const payload = data as { platform?: string; messenger_id?: string; message?: string; business_id?: string };
 
         if (!payload.platform || !payload.messenger_id || !payload.message) {
           ws.send(JSON.stringify({ type: "send_result", success: false, error: "platform, messenger_id, and message are required." }));
           return;
         }
 
-        const result = await agentHub.sendAgentMessage(agent_id, payload.platform, payload.messenger_id, payload.message);
+        const result = await agentHub.sendAgentMessage(agent_id, payload.platform, payload.messenger_id, payload.message, payload.business_id);
         ws.send(JSON.stringify({
           type: "send_result",
           success: result.success,
@@ -168,6 +176,7 @@ export const agentWebsocketRoutes = new Elysia().ws("/ws/agents", {
           limit?: number;
           cursor?: number;
           append?: boolean;
+          business_id?: string;
         };
 
         if (!payload.platform || !payload.messenger_id) {
@@ -179,7 +188,8 @@ export const agentWebsocketRoutes = new Elysia().ws("/ws/agents", {
           payload.platform,
           payload.messenger_id,
           payload.limit,
-          payload.cursor
+          payload.cursor,
+          payload.business_id
         );
 
         ws.send(JSON.stringify({

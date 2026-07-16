@@ -5,6 +5,7 @@ import {
   createBusiness,
   getBusinessById,
   getEvolutionConnectionStatus,
+  listConversations,
   refetchEvolutionQrCode
 } from "../services/BusinessRegistry";
 
@@ -128,4 +129,24 @@ export const businessesRoutes = new Elysia({ prefix: "/api/businesses" })
       return { success: true, ...result };
     },
     { detail: { summary: "Poll WhatsApp connection status for this business", tags: ["Businesses"] } }
+  )
+
+  .get(
+    "/:id/conversations",
+    async ({ params, set }) => {
+      const business = await getBusinessById(params.id);
+      if (!business) {
+        set.status = 404;
+        return { success: false, error: "Business not found" };
+      }
+
+      const conversations = await listConversations(params.id);
+      return { success: true, conversations };
+    },
+    {
+      detail: {
+        summary: "Omnichannel inbox — every conversation for this business across every platform",
+        tags: ["Businesses"]
+      }
+    }
   );

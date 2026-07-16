@@ -1,4 +1,4 @@
-import { eq } from "drizzle-orm";
+import { and, desc, eq } from "drizzle-orm";
 import { db, schema } from "../db";
 import { TelegramAdapter } from "../platforms/TelegramAdapter";
 import { EvolutionAdapter } from "../platforms/EvolutionAdapter";
@@ -217,4 +217,67 @@ export function resolveAdapterForBusiness(platform: string, business: BusinessRo
   }
 
   return null;
+}
+
+export interface ConversationSummary {
+  messenger_id: string;
+  platform: string;
+  display_name: string;
+  is_escalated: boolean;
+  escalation_status: string | null;
+  claimed_by_agent_id: string | null;
+  last_message: { text: string; is_from_user: boolean; created_at: string | null } | null;
+  updated_at: string | null;
+}
+
+/**
+ * The omnichannel inbox listing: every conversation for a business across every
+ * platform, bot-handled or escalated, with a last-message preview — what the
+ * dashboard's inbox view is built from (vs. the agent-queue endpoints, which only
+ * show escalated chats).
+ */
+export async function listConversations(business_id: string): Promise<ConversationSummary[]> {
+  const messengers = await db
+    .select()
+    .from(schema.messengers)
+    .where(eq(schema.messengers.business_id, business_id))
+    .orderBy(desc(schema.messengers.updated_at));
+
+  const summaries: ConversationSummary[] = [];
+  for (const messenger of messengers) {
+    const lastMessage = await db
+      .select()
+      .from(schema.chatMessages)
+      .where(
+        and(
+          eq(schema.chatMessages.messenger_id, messenger.messenger_id),
+          eq(schema.chatMessages.platform, messenger.platform),
+          eq(schema.chatMessages.business_id, business_id)
+        )
+      )
+      .orderBy(desc(schema.chatMessages.id))
+      .limit(1)
+      .then((rows) => rows[0]);
+
+    const nameParts = [messenger.first_name, messenger.last_name].filter(Boolean).join(" ").trim();
+
+    summaries.push({
+      messenger_id: messenger.messenger_id,
+      platform: messenger.platform,
+      display_name: messenger.username || nameParts || messenger.messenger_id,
+      is_escalated: Boolean(messenger.is_escalated),
+      escalation_status: messenger.escalation_status,
+      claimed_by_agent_id: messenger.claimed_by_agent_id,
+      last_message: lastMessage
+        ? {
+            text: lastMessage.message_text,
+            is_from_user: lastMessage.is_from_user,
+            created_at: lastMessage.created_at
+          }
+        : null,
+      updated_at: messenger.updated_at
+    });
+  }
+
+  return summaries;
 }

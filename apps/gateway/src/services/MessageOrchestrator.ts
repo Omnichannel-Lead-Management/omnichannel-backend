@@ -401,7 +401,7 @@ export class MessageOrchestrator {
         await this.saveReply(correlatedPayload.messenger_id, correlatedPayload.platform, confirmMsg, {
           request_id: requestId
         }, correlatedPayload.business_id);
-        await agentHub.notifyConversationDeEscalated(correlatedPayload.platform, correlatedPayload.messenger_id);
+        await agentHub.notifyConversationDeEscalated(correlatedPayload.platform, correlatedPayload.messenger_id, correlatedPayload.business_id);
         logWithCorrelation(
           requestId,
           "OUTBOUND_RESPONSE",
@@ -457,7 +457,7 @@ export class MessageOrchestrator {
 
       // 5. If conversation is escalated, route the message to the agent channel.
       if (messengerInfo?.is_escalated) {
-        if (!agentHub.hasConnectedAgents()) {
+        if (!agentHub.hasConnectedAgents(correlatedPayload.business_id)) {
           await db
             .update(schema.messengers)
             .set({
@@ -478,7 +478,8 @@ export class MessageOrchestrator {
 
           await agentHub.notifyConversationDeEscalated(
             correlatedPayload.platform,
-            correlatedPayload.messenger_id
+            correlatedPayload.messenger_id,
+            correlatedPayload.business_id
           );
 
           const adapter = await this.resolveAdapter(correlatedPayload.platform, correlatedPayload.business_id);
@@ -523,6 +524,7 @@ export class MessageOrchestrator {
           await agentHub.handleEscalatedUserMessage({
             platform: correlatedPayload.platform,
             messenger_id: correlatedPayload.messenger_id,
+            business_id: correlatedPayload.business_id,
             text: correlatedPayload.message
           });
 
@@ -962,9 +964,9 @@ export class MessageOrchestrator {
           `platform=${payload.platform} messenger_id=${payload.messenger_id} decision=escalated_to_human_queue`
         );
 
-        await agentHub.notifyConversationQueued(payload.platform, payload.messenger_id);
+        await agentHub.notifyConversationQueued(payload.platform, payload.messenger_id, payload.business_id);
 
-        if (!agentHub.hasConnectedAgents()) {
+        if (!agentHub.hasConnectedAgents(payload.business_id)) {
           const noAgentMessage = "No customer care agents are available right now. Please wait a few hours and try again.";
           await adapter.sendMessage(payload.messenger_id, noAgentMessage, {
             request_id: requestId
