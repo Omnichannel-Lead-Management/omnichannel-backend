@@ -3,9 +3,8 @@ import type { Config } from "drizzle-kit";
 export default {
   schema: "./src/db/schema.ts",
   out: "./drizzle",
-  dialect: "sqlite",
-  driver: "bun:sqlite",
+  dialect: "postgresql",
   dbCredentials: {
-    url: process.env.DATABASE_PATH || "./sqlite/messaging.db"
+    url: process.env.DATABASE_URL || "postgres://postgres:postgres@localhost:5432/messaging"
   }
 } satisfies Config;

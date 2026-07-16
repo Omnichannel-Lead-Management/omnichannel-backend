@@ -35,9 +35,6 @@ COPY src ./src
 COPY drizzle.config.ts ./
 COPY package.json ./
 
-# Create directory for SQLite database
-RUN mkdir -p /app/sqlite
-
 # Expose port
 EXPOSE 3000
 

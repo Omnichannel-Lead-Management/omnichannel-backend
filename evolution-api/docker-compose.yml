@@ -1,0 +1,83 @@
+# Evolution API — self-hosted WhatsApp gateway (Baileys/WhatsApp-Web protocol).
+# Each vendor (salon, photographer, tutor, ...) gets their own "instance" inside
+# this one deployment — no Meta Business verification needed per vendor.
+#
+# Usage:
+#   cp .env.example .env   # fill in POSTGRES_PASSWORD and AUTHENTICATION_API_KEY
+#   docker compose up -d
+#   curl -X POST http://localhost:8080/instance/create -H "apikey: <AUTHENTICATION_API_KEY>" \
+#     -H "Content-Type: application/json" \
+#     -d '{"instanceName": "biz_<id>", "qrcode": true, "integration": "WHATSAPP-BAILEYS"}'
+#   -> response.qrcode.base64 is a data: URI, paste it in a browser to scan.
+#
+# NOTE: evoapicloud/evolution-manager (the web UI) is intentionally NOT included here —
+# its :latest image has an unresolved upstream nginx crash-loop bug
+# (github.com/EvolutionAPI/evolution-api/issues/2093, confirmed still broken as of this
+# writing). Manage instances via the API directly (see README.md) until that's fixed upstream.
+
+services:
+  evolution-api:
+    image: evoapicloud/evolution-api:v2.3.7
+    container_name: evolution-api
+    restart: unless-stopped
+    ports:
+      - "${EVOLUTION_PORT:-8080}:8080"
+    env_file:
+      - .env
+    environment:
+      - DATABASE_CONNECTION_URI=postgresql://${POSTGRES_USER:-evolution}:${POSTGRES_PASSWORD:-evolution}@evolution-postgres:5432/${POSTGRES_DB:-evolution_db}?schema=evolution_api
+      - CACHE_REDIS_URI=redis://evolution-redis:6379/6
+    volumes:
+      - evolution_instances:/evolution/instances
+    depends_on:
+      evolution-postgres:
+        condition: service_healthy
+      evolution-redis:
+        condition: service_healthy
+    networks:
+      - evolution-net
+
+  evolution-redis:
+    image: redis:7-alpine
+    container_name: evolution-redis
+    restart: unless-stopped
+    command: redis-server --appendonly yes
+    volumes:
+      - evolution_redis:/data
+    networks:
+      - evolution-net
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  evolution-postgres:
+    image: postgres:15-alpine
+    container_name: evolution-postgres
+    restart: unless-stopped
+    environment:
+      - POSTGRES_USER=${POSTGRES_USER:-evolution}
+      - POSTGRES_PASSWORD=${POSTGRES_PASSWORD:-evolution}
+      - POSTGRES_DB=${POSTGRES_DB:-evolution_db}
+    volumes:
+      - evolution_postgres:/var/lib/postgresql/data
+    networks:
+      - evolution-net
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-evolution}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+networks:
+  evolution-net:
+    driver: bridge
+
+volumes:
+  evolution_instances:
+    driver: local
+  evolution_redis:
+    driver: local
+  evolution_postgres:
+    driver: local

@@ -10,7 +10,10 @@ services:
     environment:
       - PORT=3000
       - NODE_ENV=production
-      - DATABASE_PATH=/app/sqlite/messaging.db
+      # Point at your Heroku Postgres add-on (heroku config:get DATABASE_URL),
+      # or the local `postgres` service below for offline dev.
+      - DATABASE_URL=${DATABASE_URL:-postgres://postgres:postgres@postgres:5432/messaging}
+      - DATABASE_SSL=${DATABASE_SSL:-}
       - ROUTING_AGENT_URL=${ROUTING_AGENT_URL:-http://host.docker.internal:3001/chat}
       - TELEGRAM_BOT_TOKEN=${TELEGRAM_BOT_TOKEN}
       - AGENT_AUTH_MODE=${AGENT_AUTH_MODE:-none}
@@ -19,8 +22,6 @@ services:
       - AGENT_JWT_ISSUER=${AGENT_JWT_ISSUER:-}
       - AGENT_JWT_AUDIENCE=${AGENT_JWT_AUDIENCE:-}
     volumes:
-      # Persist SQLite database
-      - ./sqlite:/app/sqlite
       # Optional: Mount logs
       - ./logs:/app/logs
     networks:
@@ -32,10 +33,32 @@ services:
       retries: 3
       start_period: 40s
 
+  # Local Postgres for offline dev. Skip this service (and point DATABASE_URL
+  # at Heroku Postgres instead) if you'd rather share one DB across the team.
+  postgres:
+    image: postgres:16-alpine
+    container_name: messaging-postgres
+    restart: unless-stopped
+    environment:
+      - POSTGRES_USER=postgres
+      - POSTGRES_PASSWORD=postgres
+      - POSTGRES_DB=messaging
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+    networks:
+      - app-network
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
 networks:
   app-network:
     driver: bridge
 
 volumes:
-  sqlite-data:
+  postgres-data:
     driver: local

@@ -14,6 +14,8 @@ import { messagingRoutes } from "./routes/messaging.routes";
 import { uploadRoutes } from "./routes/upload.routes";
 import { telegramRoutes } from "./routes/telegram.routes";
 import { whatsappRoutes } from "./routes/whatsapp.routes";
+import { evolutionRoutes } from "./routes/evolution.routes";
+import { businessesRoutes } from "./routes/businesses.routes";
 import { websocketRoutes } from "./routes/websocket.routes";
 import { agentWebsocketRoutes } from "./routes/agent.websocket.routes";
 import { agentsRoutes } from "./routes/agents.routes";
@@ -89,8 +91,11 @@ const app = new Elysia()
       history: "GET /api/messaging/history",
       upload_image: "POST /api/upload-image",
       agent_status: "GET /api/agents/status",
+      businesses: "POST /api/businesses",
       telegram_webhook: "POST /webhook/telegram",
+      telegram_webhook_multi_tenant: "POST /webhook/telegram/:business_id",
       whatsapp_webhook: "POST /webhook/whatsapp",
+      evolution_webhook_multi_tenant: "POST /webhook/evolution/:business_id",
       websocket: "WS /ws/chat",
       agent_websocket: "WS /ws/agents"
     }
@@ -99,9 +104,11 @@ const app = new Elysia()
   .use(messagingRoutes)
   .use(uploadRoutes)
   .use(agentsRoutes)
+  .use(businessesRoutes)
   .use(healthRoutes)
   .use(telegramRoutes)
   .use(whatsappRoutes)
+  .use(evolutionRoutes)
   .use(websocketRoutes)
   .use(agentWebsocketRoutes)
   // Error handler

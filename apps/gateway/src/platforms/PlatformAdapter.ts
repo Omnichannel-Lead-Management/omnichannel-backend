@@ -145,6 +145,8 @@ export interface PlatformAdapter {
 export interface IncomingMessage {
   platform: string;
   request_id?: string;
+  /** Tenant that owns this conversation. Absent/omitted = legacy single-tenant .env-based bot. */
+  business_id?: string;
   messenger_id: string;
   message: string;
   /** Publicly accessible URL of an image the user sent (uploaded to storage) */
@@ -182,6 +184,7 @@ export interface ChatHistoryEntry {
 /** Payload sent to the external routing agent */
 export interface AIRequestPayload {
   request_id?: string;
+  business_id?: string;
   messenger_id: string;
   platform: string;
   message: string;

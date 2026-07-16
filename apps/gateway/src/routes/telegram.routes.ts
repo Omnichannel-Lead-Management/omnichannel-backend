@@ -15,6 +15,7 @@ import { messageOrchestrator } from "../services/MessageOrchestrator";
 import { TelegramAdapter, formatTelegramWebhook } from "../platforms/TelegramAdapter";
 import { uploadToStorage } from "../services/StorageService";
 import { transcribeAudioFile, uploadVoiceToStorage } from "../services/VoiceService";
+import { getBusinessById } from "../services/BusinessRegistry";
 
 const telegramAdapter = new TelegramAdapter();
 const CALLBACK_QUERY_TTL_MS = 10 * 60 * 1000;
@@ -42,7 +43,8 @@ type OrchestratorInput = Parameters<typeof messageOrchestrator.processIncomingMe
 
 async function processTelegramMessageAsync(
   formattedMessage: Record<string, unknown>,
-  correlationId: string
+  correlationId: string,
+  adapter: TelegramAdapter = telegramAdapter
 ): Promise<void> {
   const mutableMessage = formattedMessage as Record<string, unknown> & {
     _photo_file_id?: string;
@@ -57,7 +59,7 @@ async function processTelegramMessageAsync(
     // If a photo was attached, download from Telegram and upload to storage
     if (mutableMessage._photo_file_id) {
       try {
-        const fileData = await telegramAdapter.downloadFile(mutableMessage._photo_file_id, correlationId);
+        const fileData = await adapter.downloadFile(mutableMessage._photo_file_id, correlationId);
         if (fileData) {
           const imageUrl = await uploadToStorage(
             fileData.data,
@@ -82,7 +84,7 @@ async function processTelegramMessageAsync(
     // If a voice/audio was attached, download from Telegram and upload to voice storage
     if (mutableMessage._audio_file_id) {
       try {
-        const fileData = await telegramAdapter.downloadFile(mutableMessage._audio_file_id, correlationId);
+        const fileData = await adapter.downloadFile(mutableMessage._audio_file_id, correlationId);
         if (fileData) {
           try {
             const sttResult = await transcribeAudioFile(
@@ -292,4 +294,137 @@ export const telegramRoutes = new Elysia({ prefix: "/webhook" })
   .get("/telegram", () => ({
     status: "Telegram webhook is active",
     timestamp: new Date().toISOString()
-  }));
+  }))
+
+  /**
+   * POST /webhook/telegram/:business_id
+   *
+   * Multi-tenant Telegram webhook — each registered business gets its own bot
+   * and its own webhook path (see BusinessRegistry.connectTelegram). The secret
+   * token is validated against that business's own stored secret, not a global env var.
+   */
+  .post(
+    "/telegram/:business_id",
+    async (context) => {
+      const { body, request, set, params } = context;
+      const correlationId =
+        (context as { correlationId?: string }).correlationId ?? generateCorrelationId();
+      set.headers[CORRELATION_ID_HEADER] = correlationId;
+      const businessId = params.business_id;
+
+      try {
+        const business = await getBusinessById(businessId);
+        if (!business || !business.telegram_webhook_secret || !business.telegram_bot_token) {
+          logWithCorrelation(
+            correlationId,
+            "WEBHOOK_AUTH_FAILED",
+            `platform=telegram business_id=${businessId} not registered for Telegram`,
+            "warn"
+          );
+          set.status = 404;
+          return { ok: false, error: "Business not found or Telegram not connected" };
+        }
+
+        const providedSecret =
+          request.headers.get("x-telegram-bot-api-secret-token")?.trim() ?? "";
+
+        if (!providedSecret || providedSecret !== business.telegram_webhook_secret) {
+          logWithCorrelation(
+            correlationId,
+            "WEBHOOK_AUTH_FAILED",
+            `platform=telegram business_id=${businessId} invalid or missing secret token`,
+            "warn"
+          );
+          set.status = 403;
+          return { ok: false, error: "Forbidden" };
+        }
+
+        logWithCorrelation(correlationId, "WEBHOOK_RECEIVED", `platform=telegram business_id=${businessId}`);
+
+        const businessAdapter = new TelegramAdapter(business.telegram_bot_token);
+
+        const callbackQueryId =
+          typeof (body as { callback_query?: { id?: unknown } })?.callback_query?.id === "string"
+            ? ((body as { callback_query?: { id?: string } }).callback_query?.id ?? "")
+            : "";
+
+        if (callbackQueryId) {
+          if (isDuplicateCallbackQuery(callbackQueryId)) {
+            logWithCorrelation(
+              correlationId,
+              "INCOMING_IGNORED",
+              `platform=telegram business_id=${businessId} duplicate callback_query_id=${callbackQueryId}`
+            );
+            return { ok: true };
+          }
+
+          const formattedCallbackMessage = formatTelegramWebhook(body);
+          if (!formattedCallbackMessage) {
+            logWithCorrelation(correlationId, "INCOMING_IGNORED", `platform=telegram business_id=${businessId} unsupported callback payload`);
+            return { ok: true };
+          }
+
+          formattedCallbackMessage.request_id = correlationId;
+          formattedCallbackMessage.business_id = businessId;
+
+          void (async () => {
+            try {
+              const ack = await businessAdapter.answerCallbackQuery(callbackQueryId, {
+                request_id: correlationId
+              });
+
+              if (!ack.success) {
+                const ackError = ack.error ?? "unknown error";
+                const isExpiredQuery = ackError.toLowerCase().includes("query is too old");
+                logWithCorrelation(
+                  correlationId,
+                  "DOWNSTREAM_ERROR",
+                  `platform=telegram business_id=${businessId} answerCallbackQuery failed: ${ackError}`,
+                  isExpiredQuery ? "info" : "warn"
+                );
+              }
+
+              await processTelegramMessageAsync(formattedCallbackMessage, correlationId, businessAdapter);
+            } catch (err) {
+              const errorMessage = err instanceof Error ? err.message : "Internal server error";
+              logWithCorrelation(correlationId, "WEBHOOK_ERROR", `platform=telegram business_id=${businessId} async callback ${errorMessage}`, "error");
+            }
+          })();
+
+          return { ok: true };
+        }
+
+        const formattedMessage = formatTelegramWebhook(body);
+
+        if (!formattedMessage) {
+          logWithCorrelation(correlationId, "INCOMING_IGNORED", `platform=telegram business_id=${businessId} unsupported payload`);
+          return { ok: true };
+        }
+
+        formattedMessage.request_id = correlationId;
+        formattedMessage.business_id = businessId;
+        logWithCorrelation(
+          correlationId,
+          "INCOMING_MESSAGE",
+          `platform=telegram business_id=${businessId} messenger_id=${formattedMessage.messenger_id} message_id=${String((formattedMessage.metadata as Record<string, unknown>)?.message_id ?? "unknown")}`
+        );
+
+        void processTelegramMessageAsync(formattedMessage, correlationId, businessAdapter);
+
+        return { ok: true };
+      } catch (error) {
+        const errorMessage = error instanceof Error ? error.message : "Internal server error";
+        logWithCorrelation(correlationId, "WEBHOOK_ERROR", `platform=telegram business_id=${businessId} ${errorMessage}`, "error");
+        set.status = 500;
+        return { ok: false, error: errorMessage };
+      }
+    },
+    {
+      body: t.Any(),
+      detail: {
+        summary: "Multi-tenant Telegram webhook",
+        description: "Receives updates from a specific business's Telegram bot.",
+        tags: ["Webhooks"]
+      }
+    }
+  );

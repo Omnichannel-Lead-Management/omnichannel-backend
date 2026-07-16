@@ -135,7 +135,7 @@ async function evaluateNotificationThrottle(recipient: string): Promise<{ thrott
     .select()
     .from(schema.whatsappMessageThrottle)
     .where(eq(schema.whatsappMessageThrottle.recipient, recipient))
-    .get();
+    .then((rows) => rows[0]);
 
   if (!row) {
     return { throttled: false };
@@ -158,7 +158,7 @@ async function evaluateNotificationThrottle(recipient: string): Promise<{ thrott
 async function recordNotificationSent(recipient: string): Promise<void> {
   const now = new Date().toISOString();
 
-  await db.run(sql`
+  await db.execute(sql`
     INSERT INTO whatsapp_message_throttle (recipient, last_sent_at, updated_at)
     VALUES (${recipient}, ${now}, ${now})
     ON CONFLICT(recipient) DO UPDATE SET
@@ -644,10 +644,10 @@ export async function formatWhatsAppWebhook(
                 and(
                   eq(schema.chatMessages.platform, "whatsapp"),
                   eq(schema.chatMessages.messenger_id, `wa_${from}`),
-                  sql`json_extract(${schema.chatMessages.metadata}, '$.message_id') = ${replyToId}`
+                  sql`(${schema.chatMessages.metadata}::json ->> 'message_id') = ${replyToId}`
                 )
               )
-              .get();
+              .then((rows) => rows[0]);
             if (original) {
               repliedTo = {
                 text: original.message_text,

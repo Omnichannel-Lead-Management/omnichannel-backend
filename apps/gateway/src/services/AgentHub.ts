@@ -344,8 +344,7 @@ export class AgentHub {
             )
       )
       .orderBy(desc(schema.chatMessages.id))
-      .limit(safeLimit + 1)
-      .all();
+      .limit(safeLimit + 1);
 
     const has_more = rows.length > safeLimit;
     const pageRows = has_more ? rows.slice(0, safeLimit) : rows;
@@ -424,8 +423,7 @@ export class AgentHub {
       .select()
       .from(schema.messengers)
       .where(eq(schema.messengers.is_escalated, 1))
-      .orderBy(desc(schema.messengers.updated_at))
-      .all();
+      .orderBy(desc(schema.messengers.updated_at));
 
     return rows.map((row) => this.mapMessengerToSummary(row));
   }
@@ -465,7 +463,7 @@ export class AgentHub {
           eq(schema.messengers.messenger_id, messenger_id)
         )
       )
-      .get();
+      .then((rows) => rows[0]);
   }
 
   private async saveAssistantMessage(

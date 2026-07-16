@@ -13,6 +13,7 @@
 import { db, schema } from "../db";
 import { eq, and, desc, gte } from "drizzle-orm";
 import { getPlatformAdapter } from "../platforms";
+import { getBusinessById, resolveAdapterForBusiness } from "./BusinessRegistry";
 import {
   CORRELATION_ID_HEADER,
   generateCorrelationId,
@@ -262,6 +263,24 @@ export class MessageOrchestrator {
   }
 
   /**
+   * Resolve the platform adapter to use for a message. When business_id is set
+   * (multi-tenant webhook routes), this uses that business's own stored
+   * credentials instead of the global .env-based singleton adapter — falling
+   * back to the singleton if the business has no adapter for that platform.
+   */
+  private async resolveAdapter(platform: string, business_id?: string) {
+    if (business_id && business_id !== "biz_default") {
+      const business = await getBusinessById(business_id);
+      if (business) {
+        const businessAdapter = resolveAdapterForBusiness(platform, business);
+        if (businessAdapter) return businessAdapter;
+      }
+    }
+
+    return getPlatformAdapter(platform);
+  }
+
+  /**
    * Process an incoming message from any platform
    * Main orchestration flow
    */
@@ -275,7 +294,8 @@ export class MessageOrchestrator {
 
       const existingMessengerInfo = await this.getMessengerInfo(
         correlatedPayload.messenger_id,
-        correlatedPayload.platform
+        correlatedPayload.platform,
+        correlatedPayload.business_id
       );
 
       correlatedPayload.language = resolveMessageLanguage(
@@ -332,13 +352,18 @@ export class MessageOrchestrator {
       await this.saveMessage({
         messenger_id: correlatedPayload.messenger_id,
         platform: correlatedPayload.platform,
+        business_id: correlatedPayload.business_id,
         message_text: correlatedPayload.message,
         is_from_user: true,
         metadata: correlatedPayload.metadata ? JSON.stringify(correlatedPayload.metadata) : null
       });
 
       // 4. Admin override: de-escalate if the magic key is sent
-      let messengerInfo = await this.getMessengerInfo(correlatedPayload.messenger_id, correlatedPayload.platform);
+      let messengerInfo = await this.getMessengerInfo(
+        correlatedPayload.messenger_id,
+        correlatedPayload.platform,
+        correlatedPayload.business_id
+      );
       if (
         this.adminDeescalateKey &&
         correlatedPayload.message.trim() === this.adminDeescalateKey &&
@@ -362,10 +387,11 @@ export class MessageOrchestrator {
           .where(
             and(
               eq(schema.messengers.messenger_id, correlatedPayload.messenger_id),
-              eq(schema.messengers.platform, correlatedPayload.platform)
+              eq(schema.messengers.platform, correlatedPayload.platform),
+              eq(schema.messengers.business_id, correlatedPayload.business_id || "biz_default")
             )
           );
-        const adapter = getPlatformAdapter(correlatedPayload.platform);
+        const adapter = await this.resolveAdapter(correlatedPayload.platform, correlatedPayload.business_id);
         const confirmMsg = "[Admin] Conversation de-escalated. AI routing resumed.";
         if (adapter) {
           await adapter.sendMessage(correlatedPayload.messenger_id, confirmMsg, {
@@ -374,7 +400,7 @@ export class MessageOrchestrator {
         }
         await this.saveReply(correlatedPayload.messenger_id, correlatedPayload.platform, confirmMsg, {
           request_id: requestId
-        });
+        }, correlatedPayload.business_id);
         await agentHub.notifyConversationDeEscalated(correlatedPayload.platform, correlatedPayload.messenger_id);
         logWithCorrelation(
           requestId,
@@ -394,12 +420,13 @@ export class MessageOrchestrator {
         await this.setPreferredLanguage(
           correlatedPayload.messenger_id,
           correlatedPayload.platform,
-          languageControlAction.language
+          languageControlAction.language,
+          correlatedPayload.business_id
         );
         correlatedPayload.language = languageControlAction.language;
 
         const languageChangedText = getLanguageChangedText(languageControlAction.language);
-        const adapter = getPlatformAdapter(correlatedPayload.platform);
+        const adapter = await this.resolveAdapter(correlatedPayload.platform, correlatedPayload.business_id);
 
         if (adapter) {
           const sendResult = await adapter.sendMessage(correlatedPayload.messenger_id, languageChangedText, {
@@ -419,7 +446,7 @@ export class MessageOrchestrator {
           type: "language_changed",
           language: languageControlAction.language,
           request_id: requestId
-        });
+        }, correlatedPayload.business_id);
         logWithCorrelation(
           requestId,
           "ROUTING_DECISION",
@@ -444,7 +471,8 @@ export class MessageOrchestrator {
             .where(
               and(
                 eq(schema.messengers.messenger_id, correlatedPayload.messenger_id),
-                eq(schema.messengers.platform, correlatedPayload.platform)
+                eq(schema.messengers.platform, correlatedPayload.platform),
+                eq(schema.messengers.business_id, correlatedPayload.business_id || "biz_default")
               )
             );
 
@@ -453,7 +481,7 @@ export class MessageOrchestrator {
             correlatedPayload.messenger_id
           );
 
-          const adapter = getPlatformAdapter(correlatedPayload.platform);
+          const adapter = await this.resolveAdapter(correlatedPayload.platform, correlatedPayload.business_id);
           const autoDeEscalatedMessage =
             "Our live agents are currently unavailable, so I switched you back to the AI assistant.";
 
@@ -470,7 +498,8 @@ export class MessageOrchestrator {
             {
               type: "auto_deescalated_no_agents",
               request_id: requestId
-            }
+            },
+            correlatedPayload.business_id
           );
 
           messengerInfo = {
@@ -502,15 +531,21 @@ export class MessageOrchestrator {
       }
 
       // 5. Load chat history (within the past month, up to 4000 chars)
-      const history = await this.getChatHistory(correlatedPayload.messenger_id, correlatedPayload.platform);
+      const history = await this.getChatHistory(
+        correlatedPayload.messenger_id,
+        correlatedPayload.platform,
+        4000,
+        correlatedPayload.business_id
+      );
 
       // 6. Prepare payload for external AI (include platform capabilities so agents
       //    can decide whether to return interactive messages)
-      const adapter = getPlatformAdapter(correlatedPayload.platform);
+      const adapter = await this.resolveAdapter(correlatedPayload.platform, correlatedPayload.business_id);
       const aiPayload: AIRequestPayload = {
         request_id: requestId,
         messenger_id: correlatedPayload.messenger_id,
         platform: correlatedPayload.platform,
+        business_id: correlatedPayload.business_id,
         message: correlatedPayload.message,
         image_url: correlatedPayload.image_url,
         language: resolveMessageLanguage(
@@ -555,11 +590,13 @@ export class MessageOrchestrator {
     messenger_id: string,
     platform: string,
     reply_text: string,
-    metadata?: Record<string, any>
+    metadata?: Record<string, any>,
+    business_id?: string
   ): Promise<void> {
     await this.saveMessage({
       messenger_id,
       platform,
+      business_id: business_id || "biz_default",
       message_text: reply_text,
       is_from_user: false,
       metadata: metadata ? JSON.stringify(metadata) : null
@@ -573,16 +610,18 @@ export class MessageOrchestrator {
    * Creates new entry if doesn't exist, updates if exists
    */
   private async upsertMessenger(payload: IncomingMessage): Promise<void> {
+    const businessId = payload.business_id || "biz_default";
     const existing = await db
       .select()
       .from(schema.messengers)
       .where(
         and(
           eq(schema.messengers.messenger_id, payload.messenger_id),
-          eq(schema.messengers.platform, payload.platform)
+          eq(schema.messengers.platform, payload.platform),
+          eq(schema.messengers.business_id, businessId)
         )
       )
-      .get();
+      .then((rows) => rows[0]);
 
     if (existing) {
       // Update existing messenger
@@ -603,6 +642,7 @@ export class MessageOrchestrator {
       await db.insert(schema.messengers).values({
         messenger_id: payload.messenger_id,
         platform: payload.platform,
+        business_id: businessId,
         first_name: payload.first_name || null,
         last_name: payload.last_name || null,
         username: payload.username || null,
@@ -611,14 +651,15 @@ export class MessageOrchestrator {
         metadata: payload.metadata ? JSON.stringify(payload.metadata) : null
       });
 
-      console.log(`👤 New messenger registered: ${payload.platform}:${payload.messenger_id}`);
+      console.log(`👤 New messenger registered: ${payload.platform}:${payload.messenger_id} (business=${businessId})`);
     }
   }
 
   private async setPreferredLanguage(
     messenger_id: string,
     platform: string,
-    language: SupportedLanguageCode
+    language: SupportedLanguageCode,
+    business_id?: string
   ): Promise<void> {
     await db
       .update(schema.messengers)
@@ -629,13 +670,14 @@ export class MessageOrchestrator {
       .where(
         and(
           eq(schema.messengers.messenger_id, messenger_id),
-          eq(schema.messengers.platform, platform)
+          eq(schema.messengers.platform, platform),
+          eq(schema.messengers.business_id, business_id || "biz_default")
         )
       );
   }
 
   private async sendLanguageSelectionMenu(payload: IncomingMessage, requestId: string): Promise<void> {
-    const adapter = getPlatformAdapter(payload.platform);
+    const adapter = await this.resolveAdapter(payload.platform, payload.business_id);
     if (!adapter) {
       return;
     }
@@ -680,7 +722,7 @@ export class MessageOrchestrator {
     await this.saveReply(payload.messenger_id, payload.platform, menuMessage.text, {
       type: "language_menu",
       request_id: requestId
-    });
+    }, payload.business_id);
 
     logWithCorrelation(
       requestId,
@@ -695,6 +737,7 @@ export class MessageOrchestrator {
   private async saveMessage(message: {
     messenger_id: string;
     platform: string;
+    business_id?: string;
     message_text: string;
     is_from_user: boolean;
     metadata: string | null;
@@ -702,6 +745,7 @@ export class MessageOrchestrator {
     await db.insert(schema.chatMessages).values({
       messenger_id: message.messenger_id,
       platform: message.platform,
+      business_id: message.business_id || "biz_default",
       message_text: message.message_text,
       is_from_user: message.is_from_user,
       metadata: message.metadata
@@ -717,7 +761,8 @@ export class MessageOrchestrator {
   async getChatHistory(
     messenger_id: string,
     platform: string,
-    maxChars: number = 4000
+    maxChars: number = 4000,
+    business_id?: string
   ): Promise<ChatHistoryEntry[]> {
     const oneMonthAgo = new Date();
     oneMonthAgo.setMonth(oneMonthAgo.getMonth() - 1);
@@ -730,11 +775,11 @@ export class MessageOrchestrator {
         and(
           eq(schema.chatMessages.messenger_id, messenger_id),
           eq(schema.chatMessages.platform, platform),
+          eq(schema.chatMessages.business_id, business_id || "biz_default"),
           gte(schema.chatMessages.created_at, cutoff)
         )
       )
-      .orderBy(desc(schema.chatMessages.created_at))
-      .all();
+      .orderBy(desc(schema.chatMessages.created_at));
 
     // Select newest messages that fit within the character budget.
     // Stop as soon as a message would push us over the limit.
@@ -761,7 +806,8 @@ export class MessageOrchestrator {
   async getRecentChatHistory(
     messenger_id: string,
     platform: string,
-    limit: number = 20
+    limit: number = 20,
+    business_id?: string
   ): Promise<ChatHistoryEntry[]> {
     const safeLimit = Math.max(1, Math.min(limit, 500));
 
@@ -771,12 +817,12 @@ export class MessageOrchestrator {
       .where(
         and(
           eq(schema.chatMessages.messenger_id, messenger_id),
-          eq(schema.chatMessages.platform, platform)
+          eq(schema.chatMessages.platform, platform),
+          eq(schema.chatMessages.business_id, business_id || "biz_default")
         )
       )
       .orderBy(desc(schema.chatMessages.created_at))
-      .limit(safeLimit)
-      .all();
+      .limit(safeLimit);
 
     return messages.reverse().map(msg => ({
       is_from_user: Boolean(msg.is_from_user),
@@ -790,7 +836,8 @@ export class MessageOrchestrator {
    */
   async getFullSessionHistory(
     messenger_id: string,
-    platform: string
+    platform: string,
+    business_id?: string
   ): Promise<Array<{ role: "user" | "assistant"; content: string; timestamp: string }>> {
     const messages = await db
       .select()
@@ -798,11 +845,11 @@ export class MessageOrchestrator {
       .where(
         and(
           eq(schema.chatMessages.messenger_id, messenger_id),
-          eq(schema.chatMessages.platform, platform)
+          eq(schema.chatMessages.platform, platform),
+          eq(schema.chatMessages.business_id, business_id || "biz_default")
         )
       )
-      .orderBy(schema.chatMessages.created_at)
-      .all();
+      .orderBy(schema.chatMessages.created_at);
 
     return messages.map((msg) => ({
       role: msg.is_from_user ? "user" : "assistant",
@@ -814,17 +861,18 @@ export class MessageOrchestrator {
   /**
    * Get messenger information
    */
-  private async getMessengerInfo(messenger_id: string, platform: string) {
+  private async getMessengerInfo(messenger_id: string, platform: string, business_id?: string) {
     return await db
       .select()
       .from(schema.messengers)
       .where(
         and(
           eq(schema.messengers.messenger_id, messenger_id),
-          eq(schema.messengers.platform, platform)
+          eq(schema.messengers.platform, platform),
+          eq(schema.messengers.business_id, business_id || "biz_default")
         )
       )
-      .get();
+      .then((rows) => rows[0]);
   }
 
   /**
@@ -876,7 +924,7 @@ export class MessageOrchestrator {
         return;
       }
 
-      const adapter = getPlatformAdapter(payload.platform);
+      const adapter = await this.resolveAdapter(payload.platform, payload.business_id);
       if (!adapter) {
         logWithCorrelation(
           requestId,
@@ -904,7 +952,8 @@ export class MessageOrchestrator {
           .where(
             and(
               eq(schema.messengers.messenger_id, payload.messenger_id),
-              eq(schema.messengers.platform, payload.platform)
+              eq(schema.messengers.platform, payload.platform),
+              eq(schema.messengers.business_id, payload.business_id || "biz_default")
             )
           );
         logWithCorrelation(
@@ -924,7 +973,7 @@ export class MessageOrchestrator {
             type: "escalation_notice",
             no_agents_available: true,
             request_id: requestId
-          });
+          }, payload.business_id);
           logWithCorrelation(
             requestId,
             "OUTBOUND_RESPONSE",
@@ -939,7 +988,7 @@ export class MessageOrchestrator {
             type: "escalation_notice",
             no_agents_available: false,
             request_id: requestId
-          });
+          }, payload.business_id);
           logWithCorrelation(
             requestId,
             "OUTBOUND_RESPONSE",
@@ -972,7 +1021,7 @@ export class MessageOrchestrator {
           await this.saveReply(payload.messenger_id, payload.platform, msg.text, {
             type: "interactive",
             request_id: requestId
-          });
+          }, payload.business_id);
           logWithCorrelation(
             requestId,
             "OUTBOUND_RESPONSE",
@@ -1000,7 +1049,8 @@ export class MessageOrchestrator {
               type: "photo",
               url: msg.url,
               request_id: requestId
-            }
+            },
+            payload.business_id
           );
           logWithCorrelation(
             requestId,
@@ -1030,7 +1080,7 @@ export class MessageOrchestrator {
                 type: "audio_fallback",
                 url: msg.url,
                 request_id: requestId
-              });
+              }, payload.business_id);
               logWithCorrelation(
                 requestId,
                 "OUTBOUND_RESPONSE",
@@ -1051,7 +1101,7 @@ export class MessageOrchestrator {
             type: "audio",
             url: msg.url,
             request_id: requestId
-          });
+          }, payload.business_id);
           logWithCorrelation(
             requestId,
             "OUTBOUND_RESPONSE",
@@ -1074,7 +1124,7 @@ export class MessageOrchestrator {
                     type: "voice_reply",
                     audio_url: audioUrl,
                     request_id: requestId
-                  });
+                  }, payload.business_id);
                   logWithCorrelation(
                     requestId,
                     "OUTBOUND_RESPONSE",
@@ -1116,7 +1166,7 @@ export class MessageOrchestrator {
 
           await this.saveReply(payload.messenger_id, payload.platform, replyText, {
             request_id: requestId
-          });
+          }, payload.business_id);
           logWithCorrelation(
             requestId,
             "OUTBOUND_RESPONSE",
@@ -1145,17 +1195,17 @@ export class MessageOrchestrator {
   /**
    * Get conversation stats for a messenger
    */
-  async getConversationStats(messenger_id: string, platform: string) {
+  async getConversationStats(messenger_id: string, platform: string, business_id?: string) {
     const messages = await db
       .select()
       .from(schema.chatMessages)
       .where(
         and(
           eq(schema.chatMessages.messenger_id, messenger_id),
-          eq(schema.chatMessages.platform, platform)
+          eq(schema.chatMessages.platform, platform),
+          eq(schema.chatMessages.business_id, business_id || "biz_default")
         )
-      )
-      .all();
+      );
 
     return {
       total_messages: messages.length,

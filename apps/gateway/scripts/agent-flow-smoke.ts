@@ -203,7 +203,17 @@ async function run(): Promise<void> {
   const agentsWsUrl = `ws://127.0.0.1:${orchestratorPort}/ws/agents`;
   const userWsUrl = `ws://127.0.0.1:${orchestratorPort}/ws/chat`;
 
-  const dbPath = `/tmp/orchestrator-smoke-${Date.now()}.db`;
+  const databaseUrl = process.env.SMOKE_DATABASE_URL || process.env.DATABASE_URL;
+  if (!databaseUrl) {
+    throw new Error(
+      "SMOKE_DATABASE_URL (or DATABASE_URL) must point at a reachable Postgres instance " +
+      "to run this smoke test — e.g. your local docker-compose postgres service or Heroku Postgres."
+    );
+  }
+
+  // Isolate this run into its own throwaway schema so repeated runs don't
+  // accumulate data and can run concurrently against a shared Postgres instance.
+  const schemaName = `smoke_${Date.now()}`;
   const orchestratorDir = process.cwd();
 
   const mockServer = await startMockRoutingServer(routingPort);
@@ -216,7 +226,8 @@ async function run(): Promise<void> {
       NODE_ENV: "test",
       PORT: String(orchestratorPort),
       ROUTING_AGENT_URL: `http://127.0.0.1:${routingPort}/chat`,
-      DATABASE_PATH: dbPath,
+      DATABASE_URL: databaseUrl,
+      DATABASE_SCHEMA: schemaName,
       AGENT_AUTH_MODE: "static",
       AGENT_AUTH_TOKENS: `${authToken1},${authToken2}`,
       ADMIN_DEESCALATE_KEY: ""
@@ -369,6 +380,20 @@ async function run(): Promise<void> {
     await new Promise<void>((resolve) => {
       mockServer.close(() => resolve());
     });
+
+    const { default: postgres } = await import("postgres");
+    const useSsl = process.env.DATABASE_SSL === "true";
+    const cleanupClient = postgres(databaseUrl, { ssl: useSsl ? "require" : false, max: 1 });
+    try {
+      await cleanupClient`DROP SCHEMA IF EXISTS ${cleanupClient(schemaName)} CASCADE`;
+      console.log(`✅ Dropped throwaway schema ${schemaName}`);
+    } catch (error) {
+      console.warn(
+        `⚠️  Failed to drop throwaway schema ${schemaName}: ${error instanceof Error ? error.message : String(error)}`
+      );
+    } finally {
+      await cleanupClient.end();
+    }
   }
 }
 

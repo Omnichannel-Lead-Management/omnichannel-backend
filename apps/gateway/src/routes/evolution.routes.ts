@@ -1,0 +1,154 @@
+/**
+ * Evolution API Webhook Routes
+ *
+ * Multi-tenant WhatsApp webhook — each business gets its own Evolution API
+ * "instance" (see BusinessRegistry.connectWhatsAppEvolution) and its own
+ * webhook path here, so inbound events resolve to that business's business_id.
+ */
+
+import { Elysia, t } from "elysia";
+import {
+  CORRELATION_ID_HEADER,
+  correlationIdMiddleware,
+  generateCorrelationId,
+  logWithCorrelation
+} from "../middleware/correlationId";
+import { messageOrchestrator } from "../services/MessageOrchestrator";
+import { formatEvolutionWebhook } from "../platforms/EvolutionAdapter";
+import { getBusinessById } from "../services/BusinessRegistry";
+
+type OrchestratorInput = Parameters<typeof messageOrchestrator.processIncomingMessage>[0];
+
+const EVOLUTION_MESSAGE_TTL_MS = 10 * 60 * 1000;
+const seenEvolutionMessageIds = new Map<string, number>();
+
+function isDuplicateEvolutionMessage(messageId: string): boolean {
+  const now = Date.now();
+
+  for (const [id, seenAt] of seenEvolutionMessageIds.entries()) {
+    if (now - seenAt > EVOLUTION_MESSAGE_TTL_MS) {
+      seenEvolutionMessageIds.delete(id);
+    }
+  }
+
+  const existing = seenEvolutionMessageIds.get(messageId);
+  if (existing && now - existing <= EVOLUTION_MESSAGE_TTL_MS) {
+    return true;
+  }
+
+  seenEvolutionMessageIds.set(messageId, now);
+  return false;
+}
+
+async function processEvolutionMessageAsync(
+  incomingMessage: OrchestratorInput,
+  correlationId: string
+): Promise<void> {
+  try {
+    const result = await messageOrchestrator.processIncomingMessage(incomingMessage);
+    if (!result.success) {
+      logWithCorrelation(
+        correlationId,
+        "ROUTING_ERROR",
+        `platform=whatsapp(evolution) orchestrator failed: ${result.error ?? "unknown error"}`,
+        "error"
+      );
+    }
+  } catch (error) {
+    const errorMessage = error instanceof Error ? error.message : "Internal server error";
+    logWithCorrelation(correlationId, "WEBHOOK_ERROR", `platform=whatsapp(evolution) async ${errorMessage}`, "error");
+  }
+}
+
+export const evolutionRoutes = new Elysia({ prefix: "/webhook" })
+  .use(correlationIdMiddleware)
+  .post(
+    "/evolution/:business_id",
+    async (context) => {
+      const { body, set, params } = context;
+      const correlationId =
+        (context as { correlationId?: string }).correlationId ?? generateCorrelationId();
+      set.headers[CORRELATION_ID_HEADER] = correlationId;
+      const businessId = params.business_id;
+
+      try {
+        const business = await getBusinessById(businessId);
+        if (!business || !business.whatsapp_instance_name) {
+          logWithCorrelation(
+            correlationId,
+            "WEBHOOK_AUTH_FAILED",
+            `platform=whatsapp(evolution) business_id=${businessId} not registered for WhatsApp`,
+            "warn"
+          );
+          set.status = 404;
+          return { ok: false, error: "Business not found or WhatsApp not connected" };
+        }
+
+        // Defense in depth: confirm the event actually belongs to this business's instance,
+        // in case someone guesses a business_id path without knowing the real instance name.
+        const payloadInstance =
+          typeof (body as { instance?: unknown })?.instance === "string"
+            ? (body as { instance: string }).instance
+            : "";
+
+        if (payloadInstance && payloadInstance !== business.whatsapp_instance_name) {
+          logWithCorrelation(
+            correlationId,
+            "WEBHOOK_AUTH_FAILED",
+            `platform=whatsapp(evolution) business_id=${businessId} instance mismatch (payload=${payloadInstance})`,
+            "warn"
+          );
+          set.status = 403;
+          return { ok: false, error: "Instance mismatch" };
+        }
+
+        logWithCorrelation(correlationId, "WEBHOOK_RECEIVED", `platform=whatsapp(evolution) business_id=${businessId}`);
+
+        const formattedMessage = formatEvolutionWebhook(body);
+        if (!formattedMessage) {
+          logWithCorrelation(correlationId, "INCOMING_IGNORED", `platform=whatsapp(evolution) business_id=${businessId} unsupported/group/self payload`);
+          return { ok: true };
+        }
+
+        const messageId = String((formattedMessage.metadata as Record<string, unknown>)?.message_id ?? "");
+        if (messageId && isDuplicateEvolutionMessage(messageId)) {
+          logWithCorrelation(
+            correlationId,
+            "INCOMING_IGNORED",
+            `platform=whatsapp(evolution) business_id=${businessId} duplicate message_id=${messageId}`
+          );
+          return { ok: true };
+        }
+
+        formattedMessage.request_id = correlationId;
+        formattedMessage.business_id = businessId;
+        logWithCorrelation(
+          correlationId,
+          "INCOMING_MESSAGE",
+          `platform=whatsapp(evolution) business_id=${businessId} messenger_id=${formattedMessage.messenger_id} message_id=${messageId || "unknown"}`
+        );
+
+        void processEvolutionMessageAsync(formattedMessage as unknown as OrchestratorInput, correlationId);
+
+        return { ok: true };
+      } catch (error) {
+        const errorMessage = error instanceof Error ? error.message : "Internal server error";
+        logWithCorrelation(correlationId, "WEBHOOK_ERROR", `platform=whatsapp(evolution) business_id=${businessId} ${errorMessage}`, "error");
+        set.status = 500;
+        return { ok: false, error: errorMessage };
+      }
+    },
+    {
+      body: t.Any(),
+      detail: {
+        summary: "Evolution API (WhatsApp) webhook",
+        description: "Receives events from a specific business's Evolution API instance.",
+        tags: ["Webhooks"]
+      }
+    }
+  )
+
+  .get("/evolution/:business_id", ({ params }) => ({
+    status: `Evolution webhook is active for business ${params.business_id}`,
+    timestamp: new Date().toISOString()
+  }));
