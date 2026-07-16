@@ -1,0 +1,169 @@
+%% Full System Architecture — Omnichannel Lead Management Platform
+%% Render: https://mermaid.live
+%% Export: PNG/PDF/SVG for slides and reports
+
+flowchart TB
+    %% ── External Actors ──────────────────────────────────────────
+    subgraph ACTORS["External Actors"]
+        CUST["Customer<br/>(WhatsApp / Telegram / Web)"]
+        AGENT["Human Agent / Staff"]
+        OWNER["Business Owner"]
+    end
+
+    subgraph EXT_API["External APIs & Services"]
+        WA_API["WhatsApp Business API<br/>(Meta)"]
+        TG_API["Telegram Bot API"]
+        GEMINI["Google Gemini API<br/>(Intent Classification)"]
+        SMTP["SMTP / Email Provider"]
+        SMS_GW["SMS Gateway"]
+    end
+
+    %% ── Frontend ─────────────────────────────────────────────────
+    subgraph FRONTEND["Frontend Layer — Port 5173"]
+        UI["Web Dashboard<br/>Vue 3 + Pinia + Vite"]
+        UI_AGENT["Agent Console<br/>(Inbox & Chat)"]
+        UI_LEADS["Lead Management<br/>(List, Score, Status)"]
+        UI_ANALYTICS["Analytics & Reports"]
+        UI_CONFIG["Chatbot & Template Config"]
+
+        UI --> UI_AGENT
+        UI --> UI_LEADS
+        UI --> UI_ANALYTICS
+        UI --> UI_CONFIG
+    end
+
+    %% ── Orchestration / Gateway ───────────────────────────────────
+    subgraph GATEWAY["Messaging Gateway — Port 3000 · Orchestrator"]
+        WH["Webhook Receivers<br/>/webhook/whatsapp · /webhook/telegram"]
+        ADAPT["Platform Adapters<br/>(Send/Receive per channel)"]
+        WS["WebSocket Server<br/>(Real-time agent updates)"]
+        GW_API["REST API"]
+    end
+
+    subgraph ROUTING["Routing Service — Port 3001"]
+        INTENT["Intent Classification"]
+        LANG["Language Detection"]
+        CB_BREAK["Circuit Breaker<br/>+ Keyword Fallback"]
+    end
+
+    %% ── Business Services ─────────────────────────────────────────
+    subgraph BUSINESS["Business Microservices"]
+        subgraph CB_SVC["Chatbot Builder — Port 3003"]
+            FLOW["Flow Execution Engine"]
+            TMPL["Sector Templates<br/>(Salon · Tutor · Photo)"]
+            SESS["Session State Manager"]
+        end
+
+        subgraph LM_SVC["Lead Manager — Port 3002"]
+            CRUD["Lead CRUD"]
+            SCORE["Lead Scoring Algorithm"]
+            ASSIGN["Agent Assignment"]
+            STATUS["Status Lifecycle<br/>new → contacted → qualified → converted"]
+        end
+
+        subgraph AP_SVC["Appointment Service — Port 3005"]
+            SCHED["Scheduling"]
+            AVAIL["Availability Check"]
+            REMIND["Reminder Triggers"]
+        end
+
+        subgraph NS_SVC["Notification Service — Port 3004"]
+            EMAIL_A["Email Adapter"]
+            SMS_A["SMS Adapter"]
+            PUSH_A["Push Adapter"]
+        end
+    end
+
+    %% ── Data Layer ────────────────────────────────────────────────
+    subgraph DATA["Data Layer — SQLite + Drizzle ORM"]
+        DB_MSG[("messaging.db<br/>businesses · messengers<br/>chat_messages")]
+        DB_LEAD[("leads.db<br/>leads · lead_activities")]
+        DB_BOT[("chatbot.db<br/>chatbot_flows · sessions")]
+        DB_APPT[("appointments.db<br/>appointments · availability")]
+        DB_NOTIF[("notifications.db<br/>notifications · templates")]
+    end
+
+    %% ── Deployment ────────────────────────────────────────────────
+    subgraph DEPLOY["Deployment — Docker Compose"]
+        direction LR
+        D1["Container per service"]
+        D2["Service discovery via env URLs"]
+    end
+
+    %% ── Customer message flow ─────────────────────────────────────
+    CUST -->|"message"| WA_API
+    CUST -->|"message"| TG_API
+    CUST -->|"web chat"| WH
+    WA_API -->|"webhook POST"| WH
+    TG_API -->|"webhook POST"| WH
+
+    WH --> ADAPT
+    ADAPT --> GW_API
+    GW_API -->|"HTTP POST /route"| INTENT
+    INTENT --> GEMINI
+    GEMINI --> INTENT
+    INTENT --> CB_BREAK
+
+    CB_BREAK -->|"service_inquiry"| FLOW
+    CB_BREAK -->|"appointment_booking"| SCHED
+    CB_BREAK -->|"general / handover"| CRUD
+
+    FLOW --> TMPL
+    FLOW --> SESS
+    FLOW -->|"createLead flag"| CRUD
+    CRUD --> SCORE
+    SCORE --> ASSIGN
+    ASSIGN --> STATUS
+
+    SCHED --> AVAIL
+    AVAIL --> REMIND
+    REMIND -->|"notify"| EMAIL_A
+
+    FLOW -->|"response messages"| ADAPT
+    CRUD -->|"new lead event"| EMAIL_A
+    SCHED -->|"confirmation"| EMAIL_A
+
+    EMAIL_A --> SMTP
+    SMS_A --> SMS_GW
+
+    ADAPT -->|"send reply"| WA_API
+    ADAPT -->|"send reply"| TG_API
+
+    GW_API -->|"WebSocket broadcast"| WS
+    WS -->|"new_lead · new_message"| UI_AGENT
+
+    %% ── Agent / Owner flows ───────────────────────────────────────
+    AGENT --> UI_AGENT
+    OWNER --> UI_CONFIG
+    AGENT --> UI_LEADS
+    OWNER --> UI_ANALYTICS
+
+    UI_AGENT -->|"WebSocket agent_reply"| WS
+    UI_LEADS -->|"REST GET/PATCH /api/leads"| CRUD
+    UI_CONFIG -->|"REST /api/flows"| FLOW
+    UI_ANALYTICS -->|"REST /api/analytics"| CRUD
+    UI -->|"REST availability"| SCHED
+
+    CRUD -->|"status: contacted"| STATUS
+
+    %% ── Database bindings ─────────────────────────────────────────
+    GW_API --- DB_MSG
+    CRUD --- DB_LEAD
+    FLOW --- DB_BOT
+    SCHED --- DB_APPT
+    EMAIL_A --- DB_NOTIF
+
+    %% ── Styling ───────────────────────────────────────────────────
+    classDef actor fill:#e8f4fc,stroke:#2c5282,color:#1a365d
+    classDef frontend fill:#ebf8ff,stroke:#3182ce,color:#1a365d
+    classDef gateway fill:#fefcbf,stroke:#d69e2e,color:#744210
+    classDef service fill:#f0fff4,stroke:#38a169,color:#22543d
+    classDef data fill:#faf5ff,stroke:#805ad5,color:#44337a
+    classDef external fill:#fff5f5,stroke:#e53e3e,color:#742a2a
+
+    class CUST,AGENT,OWNER actor
+    class UI,UI_AGENT,UI_LEADS,UI_ANALYTICS,UI_CONFIG frontend
+    class WH,ADAPT,WS,GW_API,INTENT,LANG,CB_BREAK gateway
+    class FLOW,TMPL,SESS,CRUD,SCORE,ASSIGN,STATUS,SCHED,AVAIL,REMIND,EMAIL_A,SMS_A,PUSH_A service
+    class DB_MSG,DB_LEAD,DB_BOT,DB_APPT,DB_NOTIF data
+    class WA_API,TG_API,GEMINI,SMTP,SMS_GW external

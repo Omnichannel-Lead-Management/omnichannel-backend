@@ -1,0 +1,76 @@
+name: omnichannel-lead-management
+
+services:
+  gateway:
+    build: ../apps/gateway
+    ports:
+      - "3000:3000"
+    environment:
+      PORT: 3000
+      ROUTING_SERVICE_URL: http://routing:3001
+      LEAD_MANAGER_URL: http://lead-manager:3002
+      CHATBOT_ENGINE_URL: http://chatbot-builder:3003
+      NOTIFICATION_SERVICE_URL: http://notification:3004
+      APPOINTMENT_SERVICE_URL: http://appointment:3005
+    volumes:
+      - ../data:/data
+    depends_on:
+      - routing
+
+  routing:
+    build: ../apps/routing
+    ports:
+      - "3001:3001"
+    environment:
+      PORT: 3001
+      GEMINI_API_KEY: ${GEMINI_API_KEY}
+      LEAD_MANAGER_URL: http://lead-manager:3002
+      CHATBOT_ENGINE_URL: http://chatbot-builder:3003
+      APPOINTMENT_SERVICE_URL: http://appointment:3005
+
+  lead-manager:
+    build: ../apps/lead-manager
+    ports:
+      - "3002:3002"
+    environment:
+      PORT: 3002
+      DATABASE_PATH: /data/leads.db
+    volumes:
+      - ../data:/data
+
+  notification:
+    build: ../apps/notification
+    ports:
+      - "3004:3004"
+    environment:
+      PORT: 3004
+      DATABASE_PATH: /data/notifications.db
+    volumes:
+      - ../data:/data
+
+  appointment:
+    build: ../apps/appointment
+    ports:
+      - "3005:3005"
+    environment:
+      PORT: 3005
+      DATABASE_PATH: /data/appointments.db
+    volumes:
+      - ../data:/data
+
+  chatbot-builder:
+    build: ../../chatbot-builder
+    ports:
+      - "3003:3003"
+    environment:
+      PORT: 3003
+      DATABASE_PATH: /data/chatbot.db
+    volumes:
+      - ../data:/data
+
+  web-dashboard:
+    build: ../../web-dashboard
+    ports:
+      - "5173:5173"
+    environment:
+      VITE_GATEWAY_URL: http://localhost:3000

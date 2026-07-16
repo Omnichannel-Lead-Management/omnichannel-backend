@@ -1,0 +1,16 @@
+{
+  "name": "lead-manager",
+  "version": "1.0.0",
+  "description": "Lead Manager Service",
+  "main": "src/index.ts",
+  "scripts": {
+    "dev": "bun run src/index.ts",
+    "start": "bun run src/index.ts"
+  },
+  "dependencies": {
+    "elysia": "^1.3.0"
+  },
+  "devDependencies": {
+    "@types/bun": "latest"
+  }
+}

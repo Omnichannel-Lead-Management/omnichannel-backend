@@ -1,0 +1,19 @@
+{
+  "name": "omnichannel-backend",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Backend monorepo for Omnichannel Lead Management Platform",
+  "workspaces": [
+    "apps/*",
+    "packages/*"
+  ],
+  "scripts": {
+    "dev": "bun run --filter '*' dev",
+    "dev:gateway": "bun run --filter gateway dev",
+    "dev:routing": "bun run --filter routing dev",
+    "dev:lead-manager": "bun run --filter lead-manager dev",
+    "dev:notification": "bun run --filter notification dev",
+    "dev:appointment": "bun run --filter appointment dev",
+    "install:all": "bun install"
+  }
+}

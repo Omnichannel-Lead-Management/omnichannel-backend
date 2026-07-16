@@ -1,0 +1,48 @@
+%% Sequence: Incoming customer message (full flow)
+%% Use for mentor demo — render at https://mermaid.live
+
+sequenceDiagram
+    autonumber
+    actor Customer
+    participant WA as WhatsApp / Telegram API
+    participant GW as Messaging Gateway :3000
+    participant RT as Routing Service :3001
+    participant AI as Google Gemini
+    participant CB as Chatbot Builder :3003
+    participant LM as Lead Manager :3002
+    participant NS as Notification Service :3004
+    participant UI as Web Dashboard :5173
+    actor Agent
+
+    Customer->>WA: "What are your prices?"
+    WA->>GW: Webhook POST /webhook/whatsapp
+    GW->>GW: Save message to messaging.db
+    GW->>RT: POST /route {message, businessId, messengerId}
+    RT->>AI: Classify intent
+    AI-->>RT: service_inquiry (confidence 0.95)
+    RT-->>GW: route → chatbot-builder
+
+    GW->>CB: POST /execute {message, intent}
+    CB->>CB: Run salon pricing flow
+    CB-->>GW: {messages[], createLead: true, score: 45}
+
+    GW->>LM: POST /api/leads {messengerId, score, source}
+    LM->>LM: Create lead, status=new, assign agent
+    LM-->>GW: lead_123
+
+    GW->>NS: POST /api/notifications/email {template: new_lead}
+    NS-->>Agent: Email alert
+
+    GW->>WA: Send chatbot reply messages
+    WA-->>Customer: Package prices + options
+
+    GW->>UI: WebSocket event: new_lead
+    UI-->>Agent: Show in inbox (real-time)
+
+    Agent->>UI: Open chat, type reply
+    UI->>GW: WebSocket agent_reply
+    GW->>WA: Send agent message
+    WA-->>Customer: "Hi, I'm Sarah..."
+
+    GW->>LM: PATCH /api/leads/lead_123 {status: contacted}
+    LM-->>UI: Lead updated

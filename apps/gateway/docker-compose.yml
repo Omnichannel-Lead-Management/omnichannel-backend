@@ -1,0 +1,41 @@
+version: '3.8'
+
+services:
+  messaging-orchestrator:
+    image: ghcr.io/rexosphere/hemas-crchestrator:latest
+    container_name: messaging-orchestrator
+    restart: unless-stopped
+    ports:
+      - "${PORT:-3000}:3000"
+    environment:
+      - PORT=3000
+      - NODE_ENV=production
+      - DATABASE_PATH=/app/sqlite/messaging.db
+      - ROUTING_AGENT_URL=${ROUTING_AGENT_URL:-http://host.docker.internal:3001/chat}
+      - TELEGRAM_BOT_TOKEN=${TELEGRAM_BOT_TOKEN}
+      - AGENT_AUTH_MODE=${AGENT_AUTH_MODE:-none}
+      - AGENT_AUTH_TOKENS=${AGENT_AUTH_TOKENS:-}
+      - AGENT_JWT_SECRET=${AGENT_JWT_SECRET:-}
+      - AGENT_JWT_ISSUER=${AGENT_JWT_ISSUER:-}
+      - AGENT_JWT_AUDIENCE=${AGENT_JWT_AUDIENCE:-}
+    volumes:
+      # Persist SQLite database
+      - ./sqlite:/app/sqlite
+      # Optional: Mount logs
+      - ./logs:/app/logs
+    networks:
+      - app-network
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:3000/api/messaging/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+
+networks:
+  app-network:
+    driver: bridge
+
+volumes:
+  sqlite-data:
+    driver: local

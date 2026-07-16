@@ -1,0 +1,17 @@
+{
+  "name": "routing",
+  "version": "1.0.0",
+  "description": "AI Routing Service",
+  "main": "src/index.ts",
+  "scripts": {
+    "dev": "bun run src/index.ts",
+    "start": "bun run src/index.ts"
+  },
+  "dependencies": {
+    "@google/genai": "^1.3.0",
+    "elysia": "^1.3.2"
+  },
+  "devDependencies": {
+    "@types/bun": "latest"
+  }
+}

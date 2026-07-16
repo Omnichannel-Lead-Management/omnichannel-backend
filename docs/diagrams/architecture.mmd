@@ -1,0 +1,34 @@
+%% Omnichannel Lead Management Platform — architecture diagram
+%% Render: https://mermaid.live  OR  npx @mermaid-js/mermaid-cli -i architecture.mmd -o architecture.pdf
+
+flowchart TB
+    subgraph channels [Customer Channels]
+        WA[WhatsApp]
+        TG[Telegram]
+        WEB[Web Chat]
+    end
+
+    GW[Messaging Gateway<br/>Port 3000]
+    RT[Routing Service<br/>Port 3001 · Gemini AI]
+
+    subgraph handlers [Business Services]
+        CB[Chatbot Builder<br/>Port 3003]
+        LM[Lead Manager<br/>Port 3002]
+        AP[Appointment Service<br/>Port 3005]
+    end
+
+    NS[Notification Service<br/>Port 3004]
+    UI[Web Dashboard<br/>Port 5173]
+
+    WA --> GW
+    TG --> GW
+    WEB --> GW
+    GW --> RT
+    RT --> CB
+    RT --> LM
+    RT --> AP
+    CB --> NS
+    LM --> NS
+    AP --> NS
+    NS --> UI
+    UI -. agent reply / WebSocket .-> GW
