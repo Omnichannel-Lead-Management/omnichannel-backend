@@ -1,0 +1,75 @@
+name: Deploy backend
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+concurrency:
+  group: deploy-omnichannel-backend
+  cancel-in-progress: true
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Bun
+        uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: latest
+
+      - name: Install dependencies
+        run: bun install
+
+      - name: Unit tests
+        run: bun test apps/gateway/src/middleware apps/gateway/src/services apps/routing/src/circuitBreaker.test.ts apps/routing/src/agents
+
+      - name: Integration tests
+        run: bun test apps/routing/src/server.integration.test.ts
+
+  deploy:
+    needs: test
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup SSH
+        uses: webfactory/ssh-agent@v0.9.0
+        with:
+          ssh-private-key: ${{ secrets.DEPLOY_SSH_KEY }}
+
+      - name: Add server host key
+        run: |
+          mkdir -p ~/.ssh
+          chmod 700 ~/.ssh
+          # ssh-keyscan can exit non-zero if one key type fails; still keep any keys found.
+          ssh-keyscan -T 15 -H "${{ secrets.DEPLOY_HOST }}" >> ~/.ssh/known_hosts 2>/dev/null || true
+          printf 'Host %s\n  StrictHostKeyChecking accept-new\n' "${{ secrets.DEPLOY_HOST }}" >> ~/.ssh/config
+
+      - name: Sync backend to server
+        env:
+          HOST: ${{ secrets.DEPLOY_HOST }}
+          USER: ${{ secrets.DEPLOY_USER }}
+          BASE: ${{ secrets.DEPLOY_PATH }}
+        run: |
+          rsync -az --delete \
+            --exclude '.git' \
+            --exclude 'node_modules' \
+            --exclude '**/node_modules' \
+            --exclude 'data' \
+            --exclude 'evolution-api' \
+            --exclude 'deployment/.env' \
+            ./ "${USER}@${HOST}:${BASE}/omnichannel-backend/"
+
+      - name: Build and restart backend services
+        env:
+          HOST: ${{ secrets.DEPLOY_HOST }}
+          USER: ${{ secrets.DEPLOY_USER }}
+          BASE: ${{ secrets.DEPLOY_PATH }}
+        run: |
+          ssh "${USER}@${HOST}" \
+            "cd '${BASE}/omnichannel-backend/deployment' && chmod +x deploy.sh && ./deploy.sh gateway routing"

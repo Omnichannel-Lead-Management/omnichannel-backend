@@ -1,76 +1,136 @@
-name: omnichannel-lead-management
+# Core stack: Gateway + Routing + Chatbot + Dashboard + edge proxy
+# Lead Manager / Appointment / Notification omitted for now.
+name: omnichannel-core
 
 services:
-  gateway:
-    build: ../apps/gateway
-    ports:
-      - "3000:3000"
+  postgres:
+    image: postgres:16-alpine
+    restart: unless-stopped
     environment:
-      PORT: 3000
-      ROUTING_SERVICE_URL: http://routing:3001
-      LEAD_MANAGER_URL: http://lead-manager:3002
-      CHATBOT_ENGINE_URL: http://chatbot-builder:3003
-      NOTIFICATION_SERVICE_URL: http://notification:3004
-      APPOINTMENT_SERVICE_URL: http://appointment:3005
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+      POSTGRES_DB: messaging
     volumes:
-      - ../data:/data
-    depends_on:
-      - routing
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
 
   routing:
     build: ../apps/routing
+    restart: unless-stopped
     ports:
       - "3001:3001"
     environment:
       PORT: 3001
+      NODE_ENV: production
       GEMINI_API_KEY: ${GEMINI_API_KEY}
-      LEAD_MANAGER_URL: http://lead-manager:3002
-      CHATBOT_ENGINE_URL: http://chatbot-builder:3003
-      APPOINTMENT_SERVICE_URL: http://appointment:3005
+      GEMINI_MODEL: ${GEMINI_MODEL:-gemini-2.5-flash}
+      CHATBOT_ENGINE_URL: http://chatbot:3003
+      LEAD_MANAGER_URL: http://127.0.0.1:9
+      APPOINTMENT_SERVICE_URL: http://127.0.0.1:9
+    healthcheck:
+      test:
+        [
+          "CMD",
+          "bun",
+          "run",
+          "-e",
+          "fetch('http://127.0.0.1:3001/health').then(r => r.ok ? process.exit(0) : process.exit(1)).catch(() => process.exit(1))"
+        ]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 20s
 
-  lead-manager:
-    build: ../apps/lead-manager
-    ports:
-      - "3002:3002"
-    environment:
-      PORT: 3002
-      DATABASE_PATH: /data/leads.db
-    volumes:
-      - ../data:/data
-
-  notification:
-    build: ../apps/notification
-    ports:
-      - "3004:3004"
-    environment:
-      PORT: 3004
-      DATABASE_PATH: /data/notifications.db
-    volumes:
-      - ../data:/data
-
-  appointment:
-    build: ../apps/appointment
-    ports:
-      - "3005:3005"
-    environment:
-      PORT: 3005
-      DATABASE_PATH: /data/appointments.db
-    volumes:
-      - ../data:/data
-
-  chatbot-builder:
+  chatbot:
     build: ../../chatbot-builder
+    restart: unless-stopped
     ports:
       - "3003:3003"
     environment:
       PORT: 3003
+      NODE_ENV: production
       DATABASE_PATH: /data/chatbot.db
+      LEAD_INTEGRATION_ENABLED: "false"
+      APPOINTMENT_INTEGRATION_ENABLED: "false"
     volumes:
-      - ../data:/data
+      - chatbot_data:/data
+    healthcheck:
+      test:
+        [
+          "CMD",
+          "bun",
+          "run",
+          "-e",
+          "fetch('http://127.0.0.1:3003/health').then(r => r.ok ? process.exit(0) : process.exit(1)).catch(() => process.exit(1))"
+        ]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 20s
 
-  web-dashboard:
-    build: ../../web-dashboard
+  gateway:
+    build: ../apps/gateway
+    restart: unless-stopped
     ports:
-      - "5173:5173"
+      - "3000:3000"
     environment:
-      VITE_GATEWAY_URL: http://localhost:3000
+      PORT: 3000
+      NODE_ENV: production
+      DATABASE_URL: postgres://postgres:postgres@postgres:5432/messaging
+      DATABASE_SSL: "false"
+      ROUTING_AGENT_URL: http://routing:3001/chat
+      TELEGRAM_BOT_TOKEN: ${TELEGRAM_BOT_TOKEN:-}
+      PUBLIC_BASE_URL: ${PUBLIC_BASE_URL:-https://cache.us.kg}
+      CORS_ALLOWED_ORIGINS: ${CORS_ALLOWED_ORIGINS:-https://cache.us.kg,http://cache.us.kg}
+      AGENT_AUTH_MODE: ${AGENT_AUTH_MODE:-none}
+    depends_on:
+      postgres:
+        condition: service_healthy
+      routing:
+        condition: service_started
+      chatbot:
+        condition: service_started
+    healthcheck:
+      test:
+        [
+          "CMD",
+          "bun",
+          "run",
+          "-e",
+          "fetch('http://127.0.0.1:3000/api/messaging/health').then(r => r.ok ? process.exit(0) : process.exit(1)).catch(() => process.exit(1))"
+        ]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+
+  dashboard:
+    build:
+      context: ../../web-dashboard
+      args:
+        VITE_GATEWAY_URL: ${PUBLIC_BASE_URL:-https://cache.us.kg}
+    restart: unless-stopped
+    # Keep direct port for debugging; public traffic should use edge :80
+    ports:
+      - "5173:80"
+    depends_on:
+      - gateway
+
+  edge:
+    image: nginx:alpine
+    restart: unless-stopped
+    ports:
+      - "80:80"
+    volumes:
+      - ./nginx-edge.conf:/etc/nginx/conf.d/default.conf:ro
+    depends_on:
+      - gateway
+      - dashboard
+
+volumes:
+  postgres_data:
+  chatbot_data:
