@@ -72,7 +72,7 @@ bun install
 
 cp apps/gateway/.env.example apps/gateway/.env
 cp apps/routing/.env.example apps/routing/.env
-# Put GEMINI_API_KEY in routing .env
+# Put GOOGLE_CLOUD_PROJECT in routing .env, then: gcloud auth application-default login
 # Put TELEGRAM_BOT_TOKEN in gateway .env
 
 bun run dev:gateway   # terminal 1
@@ -82,7 +82,7 @@ bun run dev:routing   # terminal 2
 **You need:**
 - [ ] Bun installed
 - [ ] Telegram bot from BotFather
-- [ ] Gemini API key (Google AI Studio)
+- [ ] GCP project with Vertex AI enabled + `gcloud auth application-default login`
 - [ ] ngrok (for Telegram webhooks on localhost)
 
 ---

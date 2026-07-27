@@ -102,8 +102,10 @@ cd ../routing-service
 bun install
 cp .env.example .env
 
-# Add your Google Gemini API key to .env
-# Get free API key: https://makersuite.google.com/app/apikey
+# Set GOOGLE_CLOUD_PROJECT in .env (Gemini is called through Vertex AI).
+# Auth comes from Application Default Credentials — no API key needed:
+#   gcloud auth application-default login    (local dev)
+#   the VM's attached service account        (on GCP)
 nano .env
 
 bun run dev
@@ -225,19 +227,41 @@ docker-compose down
 
 ## API Keys & Credentials
 
-### Google Gemini API (Required for AI)
+### Google Gemini via Vertex AI (Required for AI)
 
-1. Go to https://makersuite.google.com/app/apikey
-2. Click "Create API Key"
-3. Copy the key
-4. Add to `routing-service/.env`:
+Gemini is called through **Vertex AI**, authenticated with Application Default
+Credentials. There is no API key to manage or rotate.
+
+**On the GCP VM (production):**
+
+1. Enable the API once per project:
+   ```bash
+   gcloud services enable aiplatform.googleapis.com --project omnichannel-vertex
    ```
-   GEMINI_API_KEY=your_key_here
+2. Give the VM's service account the **Vertex AI User** role
+   (`roles/aiplatform.user`) and the `cloud-platform` scope.
+3. Set in `.env` — credentials are picked up from the VM automatically:
+   ```
+   GOOGLE_CLOUD_PROJECT=omnichannel-vertex
+   GOOGLE_CLOUD_LOCATION=us-central1
+   GEMINI_MODEL=gemini-2.5-flash
    ```
 
-**Free tier limits:**
-- 60 requests per minute
-- Sufficient for development and demo
+**On a local dev machine:**
+
+```bash
+gcloud auth application-default login
+gcloud config set project omnichannel-vertex
+```
+then use the same `.env` values.
+
+**Fallback:** without a GCP project you can still run against the Gemini
+Developer API by setting `GEMINI_API_KEY` and leaving `GOOGLE_CLOUD_PROJECT`
+unset. Force either backend explicitly with
+`GOOGLE_GENAI_USE_VERTEXAI=true|false`.
+
+**Quotas:** Vertex AI quota is per-project and per-region, and is billed to the
+GCP project rather than capped at the Developer API free tier.
 
 ---
 
@@ -451,13 +475,28 @@ rm shared/data/messaging.db
 bun run db:migrate
 ```
 
-### Gemini API Quota Exceeded
+### Vertex AI Quota Exceeded / 403 Permission Denied
 
-Free tier: 60 requests/minute
+**429 quota exceeded** — Vertex AI quota is per-project *and* per-region.
 
-**Solution:**
-- Wait 1 minute
+- Wait, or request a quota increase for `aiplatform.googleapis.com` in the console
 - Implement request throttling
+
+**403 permission denied** — the service account is missing access.
+
+```bash
+# Confirm the API is on
+gcloud services list --enabled --project omnichannel-vertex | grep aiplatform
+# Grant Vertex AI User to the VM's service account
+gcloud projects add-iam-policy-binding omnichannel-vertex \
+  --member "serviceAccount:<SA_EMAIL>" --role roles/aiplatform.user
+```
+
+**"Could not load the default credentials"** — ADC is not available. On a VM,
+check the instance has the `cloud-platform` scope; locally run
+`gcloud auth application-default login`. Inside Docker, set
+`GCE_METADATA_HOST=169.254.169.254` so the container reaches the metadata
+server without a DNS lookup.
 - Upgrade to paid tier
 
 ### CORS Errors in Web Dashboard
@@ -612,7 +651,9 @@ LEAD_MANAGER_URL=http://localhost:3002
 ### Routing Service
 ```env
 PORT=3001
-GEMINI_API_KEY=your_api_key
+GOOGLE_CLOUD_PROJECT=omnichannel-vertex
+GOOGLE_CLOUD_LOCATION=us-central1
+GEMINI_MODEL=gemini-2.5-flash
 ```
 
 ### Lead Manager

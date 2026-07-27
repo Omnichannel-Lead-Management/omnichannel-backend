@@ -26,7 +26,10 @@ services:
     environment:
       PORT: 3001
       NODE_ENV: production
-      GEMINI_API_KEY: ${GEMINI_API_KEY}
+      GOOGLE_CLOUD_PROJECT: ${GOOGLE_CLOUD_PROJECT:-}
+      GOOGLE_CLOUD_LOCATION: ${GOOGLE_CLOUD_LOCATION:-us-central1}
+      GCE_METADATA_HOST: ${GCE_METADATA_HOST:-}
+      GEMINI_API_KEY: ${GEMINI_API_KEY:-}
       GEMINI_MODEL: ${GEMINI_MODEL:-gemini-2.5-flash}
       CHATBOT_ENGINE_URL: http://chatbot:3003
       LEAD_MANAGER_URL: http://127.0.0.1:9
@@ -56,6 +59,12 @@ services:
       DATABASE_PATH: /data/chatbot.db
       LEAD_INTEGRATION_ENABLED: "false"
       APPOINTMENT_INTEGRATION_ENABLED: "false"
+      GOOGLE_CLOUD_PROJECT: ${GOOGLE_CLOUD_PROJECT:-}
+      GOOGLE_CLOUD_LOCATION: ${GOOGLE_CLOUD_LOCATION:-us-central1}
+      GCE_METADATA_HOST: ${GCE_METADATA_HOST:-}
+      GEMINI_API_KEY: ${GEMINI_API_KEY:-}
+      GEMINI_MODEL: ${GEMINI_MODEL:-gemini-2.5-flash}
+      LLM_ROUTING_ENABLED: ${LLM_ROUTING_ENABLED:-true}
     volumes:
       - chatbot_data:/data
     healthcheck:

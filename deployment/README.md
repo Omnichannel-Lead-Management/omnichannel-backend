@@ -37,7 +37,10 @@ This repository contains the Docker Compose deployment for the Omnichannel Lead 
 - Docker 24+
 - Docker Compose v2
 - Access to required API keys and external services:
-  - Gemini API
+  - Vertex AI (`aiplatform.googleapis.com`) enabled on the GCP project, with the
+    host VM's service account granted `roles/aiplatform.user`. Gemini is reached
+    through Vertex AI using the VM's Application Default Credentials — set
+    `GOOGLE_CLOUD_PROJECT` in `.env`; no API key is stored.
   - Azure Vision and Azure Search (for vision service)
   - Qdrant (for complaint retrieval)
 

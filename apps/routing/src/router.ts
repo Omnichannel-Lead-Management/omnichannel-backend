@@ -1,4 +1,4 @@
-import { GoogleGenAI } from "@google/genai";
+import { ai, GEMINI_MODEL } from "./genaiClient";
 import { getRegisteredAgents, getAgent } from "./agents/registry";
 import { isCircuitOpen, recordAgentFailure, recordAgentSuccess } from "./circuitBreaker";
 import type {
@@ -11,12 +11,6 @@ import type {
   LanguageCode
 } from "./types";
 
-if (!process.env.GEMINI_API_KEY) {
-  throw new Error("GEMINI_API_KEY environment variable is required");
-}
-
-const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY });
-const GEMINI_MODEL = process.env.GEMINI_MODEL ?? "gemini-2.0-flash";
 const DOWNSTREAM_TIMEOUT_MS = 15_000;
 
 type LogLevel = "info" | "warn" | "error";
