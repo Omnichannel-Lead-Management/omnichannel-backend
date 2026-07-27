@@ -19,6 +19,12 @@ export interface ChatRequest {
   message: string;
   /** Correlation ID propagated from orchestrator (X-Request-ID) */
   request_id?: string;
+  /**
+   * Tenant the message belongs to. Must be forwarded to downstream agents —
+   * without it they fall back to their default business and every tenant gets
+   * the demo business's flows, FAQs and prices.
+   */
+  business_id?: string;
   /** Platform-specific user identifier (e.g. "tg_123456") */
   messenger_id: string;
   /** Source platform name */

@@ -49,6 +49,7 @@ const app = new Elysia()
       body: t.Object({
         message: t.String({ minLength: 1, error: "message must be a non-empty string" }),
         request_id: t.Optional(t.String()),
+        business_id: t.Optional(t.String()),
         messenger_id: t.String({ minLength: 1, error: "messenger_id is required" }),
         platform: t.Optional(t.String()),
         image_url: t.Optional(t.Nullable(t.String())),

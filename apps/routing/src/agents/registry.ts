@@ -116,6 +116,7 @@ export const agentRegistry: Record<string, AgentConfig> = {
       return {
         message: summary,
         messenger_id: req.messenger_id,
+        business_id: req.business_id,
         language: resolveLanguageCode(req),
         language_tag: resolveLanguageTag(req),
         platform_capabilities: req.platform_capabilities ?? DEFAULT_CAPABILITIES,
@@ -134,6 +135,7 @@ export const agentRegistry: Record<string, AgentConfig> = {
       return {
         message: summary,
         messenger_id: req.messenger_id,
+        business_id: req.business_id,
         language: resolveLanguageCode(req),
         language_tag: resolveLanguageTag(req),
         platform_capabilities: req.platform_capabilities ?? DEFAULT_CAPABILITIES,
@@ -152,6 +154,7 @@ export const agentRegistry: Record<string, AgentConfig> = {
       return {
         message: summary,
         messenger_id: req.messenger_id,
+        business_id: req.business_id,
         language: resolveLanguageCode(req),
         language_tag: resolveLanguageTag(req),
         platform_capabilities: req.platform_capabilities ?? DEFAULT_CAPABILITIES,
