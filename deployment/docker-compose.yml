@@ -122,6 +122,10 @@ services:
       context: ../../web-dashboard
       args:
         VITE_GATEWAY_URL: ${PUBLIC_BASE_URL:-https://cache.us.kg}
+        VITE_BUSINESS_ID: ${DASHBOARD_BUSINESS_ID:-}
+        VITE_BUSINESS_NAME: ${DASHBOARD_BUSINESS_NAME:-}
+        VITE_BUSINESS_SECTOR: ${DASHBOARD_BUSINESS_SECTOR:-}
+        VITE_BUSINESS_EMAIL: ${DASHBOARD_BUSINESS_EMAIL:-}
     restart: unless-stopped
     # Keep direct port for debugging; public traffic should use edge :80
     ports:
