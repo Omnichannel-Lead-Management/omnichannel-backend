@@ -78,6 +78,22 @@ const APPOINTMENT_CONFLICT_SQL = `
   LIMIT 1
 `;
 
+const ACTIVE_APPOINTMENTS_FOR_DATE_SQL = `
+  SELECT
+    start_time,
+    end_time
+  FROM appointments
+  WHERE business_id = ?
+    AND status IN ('pending', 'confirmed')
+    AND start_time < ?
+    AND end_time > ?
+  ORDER BY start_time ASC
+`;
+
+const OPENING_HOUR_UTC = 9;
+const CLOSING_HOUR_UTC = 17;
+const SLOT_DURATION_MS = 30 * 60 * 1000;
+
 const ALLOWED_STATUS_TRANSITIONS: Record<
   AppointmentStatus,
   readonly AppointmentStatus[]
@@ -108,6 +124,16 @@ export type CreateAppointmentAvailabilityResult =
   | {
       result: "conflict";
     };
+
+export type AppointmentAvailabilitySlot = {
+  startTime: string;
+  endTime: string;
+};
+
+interface ActiveAppointmentTimeRow {
+  start_time: string;
+  end_time: string;
+}
 
 interface AppointmentRow {
   id: string;
@@ -202,6 +228,55 @@ export function createAppointmentIfAvailable(
   );
 
   return transaction();
+}
+
+export function getAvailableAppointmentSlots(
+  db: Database,
+  businessId: string,
+  date: string
+): AppointmentAvailabilitySlot[] {
+  const requestedDateStart = new Date(`${date}T00:00:00.000Z`);
+  const followingDateStart = new Date(
+    requestedDateStart.getTime() + 24 * 60 * 60 * 1000
+  );
+  const openingTime = new Date(requestedDateStart);
+  openingTime.setUTCHours(OPENING_HOUR_UTC, 0, 0, 0);
+  const closingTime = new Date(requestedDateStart);
+  closingTime.setUTCHours(CLOSING_HOUR_UTC, 0, 0, 0);
+
+  const activeAppointments = db
+    .query<ActiveAppointmentTimeRow, [string, string, string]>(
+      ACTIVE_APPOINTMENTS_FOR_DATE_SQL
+    )
+    .all(
+      businessId,
+      followingDateStart.toISOString(),
+      requestedDateStart.toISOString()
+    );
+
+  const slots: AppointmentAvailabilitySlot[] = [];
+
+  for (
+    let slotStart = openingTime.getTime();
+    slotStart < closingTime.getTime();
+    slotStart += SLOT_DURATION_MS
+  ) {
+    const slotEnd = slotStart + SLOT_DURATION_MS;
+    const isBlocked = activeAppointments.some((appointment) => {
+      const appointmentStart = Date.parse(appointment.start_time);
+      const appointmentEnd = Date.parse(appointment.end_time);
+      return appointmentStart < slotEnd && appointmentEnd > slotStart;
+    });
+
+    if (!isBlocked) {
+      slots.push({
+        startTime: new Date(slotStart).toISOString(),
+        endTime: new Date(slotEnd).toISOString(),
+      });
+    }
+  }
+
+  return slots;
 }
 
 export function listAppointmentsByBusiness(

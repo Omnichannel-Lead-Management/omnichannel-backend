@@ -2,10 +2,12 @@ import type { Database } from "bun:sqlite";
 import { Elysia } from "elysia";
 import {
   createAppointmentIfAvailable,
+  getAvailableAppointmentSlots,
   getAppointmentById,
   listAppointmentsByBusiness,
   updateAppointmentStatus,
 } from "../services/appointment-service";
+import { validateAvailabilityQuery } from "../validation/availability-query";
 import { validateCreateAppointmentInput } from "../validation/create-appointment";
 import { validateUpdateAppointmentStatus } from "../validation/update-appointment-status";
 
@@ -74,6 +76,38 @@ export function createAppointmentRoutes(db: Database): Elysia {
         return {
           success: false,
           message: "Failed to retrieve appointments.",
+        };
+      }
+    })
+    .get("/availability", ({ query, set }) => {
+      const validation = validateAvailabilityQuery(query);
+
+      if (!validation.success) {
+        set.status = 400;
+        return {
+          success: false,
+          message: "Invalid availability request.",
+          errors: validation.errors,
+        };
+      }
+
+      try {
+        const { businessId, date } = validation.data;
+
+        return {
+          success: true,
+          data: {
+            businessId,
+            date,
+            slots: getAvailableAppointmentSlots(db, businessId, date),
+          },
+        };
+      } catch (error) {
+        console.error("Failed to retrieve appointment availability.", error);
+        set.status = 500;
+        return {
+          success: false,
+          message: "Failed to retrieve appointment availability.",
         };
       }
     })
