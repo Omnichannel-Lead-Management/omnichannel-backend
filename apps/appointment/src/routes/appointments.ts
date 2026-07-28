@@ -1,7 +1,7 @@
 import type { Database } from "bun:sqlite";
 import { Elysia } from "elysia";
 import {
-  createAppointment,
+  createAppointmentIfAvailable,
   getAppointmentById,
   listAppointmentsByBusiness,
   updateAppointmentStatus,
@@ -27,14 +27,24 @@ export function createAppointmentRoutes(db: Database): Elysia {
       }
 
       try {
-        const appointment = createAppointment(db, validation.data);
+        const result = createAppointmentIfAvailable(db, validation.data);
+
+        if (result.result === "conflict") {
+          set.status = 409;
+          return {
+            success: false,
+            message: "The requested appointment time is not available.",
+          };
+        }
+
         set.status = 201;
 
         return {
           success: true,
-          data: appointment,
+          data: result.appointment,
         };
-      } catch {
+      } catch (error) {
+        console.error("Failed to create appointment.", error);
         set.status = 500;
         return {
           success: false,

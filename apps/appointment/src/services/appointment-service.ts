@@ -68,6 +68,16 @@ const UPDATE_APPOINTMENT_STATUS_SQL = `
   WHERE id = ?
 `;
 
+const APPOINTMENT_CONFLICT_SQL = `
+  SELECT id
+  FROM appointments
+  WHERE business_id = ?
+    AND status IN ('pending', 'confirmed')
+    AND start_time < ?
+    AND end_time > ?
+  LIMIT 1
+`;
+
 const ALLOWED_STATUS_TRANSITIONS: Record<
   AppointmentStatus,
   readonly AppointmentStatus[]
@@ -88,6 +98,15 @@ export type UpdateAppointmentStatusResult =
     }
   | {
       result: "invalid_transition";
+    };
+
+export type CreateAppointmentAvailabilityResult =
+  | {
+      result: "created";
+      appointment: Appointment;
+    }
+  | {
+      result: "conflict";
     };
 
 interface AppointmentRow {
@@ -141,6 +160,48 @@ export function createAppointment(
   );
 
   return appointment;
+}
+
+export function hasAppointmentConflict(
+  db: Database,
+  businessId: string,
+  startTime: string,
+  endTime: string
+): boolean {
+  const conflictingAppointment = db
+    .query<{ id: string }, [string, string, string]>(
+      APPOINTMENT_CONFLICT_SQL
+    )
+    .get(businessId, endTime, startTime);
+
+  return conflictingAppointment !== null;
+}
+
+export function createAppointmentIfAvailable(
+  db: Database,
+  input: CreateAppointmentInput
+): CreateAppointmentAvailabilityResult {
+  const transaction = db.transaction(
+    (): CreateAppointmentAvailabilityResult => {
+      if (
+        hasAppointmentConflict(
+          db,
+          input.businessId,
+          input.startTime,
+          input.endTime
+        )
+      ) {
+        return { result: "conflict" };
+      }
+
+      return {
+        result: "created",
+        appointment: createAppointment(db, input),
+      };
+    }
+  );
+
+  return transaction();
 }
 
 export function listAppointmentsByBusiness(
