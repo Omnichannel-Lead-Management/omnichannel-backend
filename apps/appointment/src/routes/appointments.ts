@@ -1,12 +1,14 @@
 import type { Database } from "bun:sqlite";
 import { Elysia } from "elysia";
-import { createAppointment } from "../services/appointment-service";
+import {
+  createAppointment,
+  listAppointmentsByBusiness,
+} from "../services/appointment-service";
 import { validateCreateAppointmentInput } from "../validation/create-appointment";
 
 export function createAppointmentRoutes(db: Database): Elysia {
-  return new Elysia({ prefix: "/api/appointments" }).post(
-    "/",
-    ({ body, set }) => {
+  return new Elysia({ prefix: "/api/appointments" })
+    .post("/", ({ body, set }) => {
       const validation = validateCreateAppointmentInput(body);
 
       if (!validation.success) {
@@ -33,6 +35,30 @@ export function createAppointmentRoutes(db: Database): Elysia {
           message: "Failed to create appointment.",
         };
       }
-    }
-  );
+    })
+    .get("/", ({ query, set }) => {
+      const businessId =
+        typeof query.businessId === "string" ? query.businessId.trim() : "";
+
+      if (businessId.length === 0) {
+        set.status = 400;
+        return {
+          success: false,
+          message: "businessId is required.",
+        };
+      }
+
+      try {
+        return {
+          success: true,
+          data: listAppointmentsByBusiness(db, businessId),
+        };
+      } catch {
+        set.status = 500;
+        return {
+          success: false,
+          message: "Failed to retrieve appointments.",
+        };
+      }
+    });
 }
