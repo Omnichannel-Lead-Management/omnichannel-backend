@@ -60,6 +60,36 @@ const GET_APPOINTMENT_BY_ID_SQL = `
   LIMIT 1
 `;
 
+const UPDATE_APPOINTMENT_STATUS_SQL = `
+  UPDATE appointments
+  SET
+    status = ?,
+    updated_at = ?
+  WHERE id = ?
+`;
+
+const ALLOWED_STATUS_TRANSITIONS: Record<
+  AppointmentStatus,
+  readonly AppointmentStatus[]
+> = {
+  pending: ["confirmed", "cancelled"],
+  confirmed: ["completed", "cancelled"],
+  cancelled: [],
+  completed: [],
+};
+
+export type UpdateAppointmentStatusResult =
+  | {
+      result: "updated";
+      appointment: Appointment;
+    }
+  | {
+      result: "not_found";
+    }
+  | {
+      result: "invalid_transition";
+    };
+
 interface AppointmentRow {
   id: string;
   business_id: string;
@@ -133,6 +163,42 @@ export function getAppointmentById(
     .get(appointmentId);
 
   return row ? mapAppointmentRow(row) : null;
+}
+
+export function updateAppointmentStatus(
+  db: Database,
+  appointmentId: string,
+  status: AppointmentStatus
+): UpdateAppointmentStatusResult {
+  const currentAppointment = getAppointmentById(db, appointmentId);
+
+  if (!currentAppointment) {
+    return { result: "not_found" };
+  }
+
+  const allowedStatuses =
+    ALLOWED_STATUS_TRANSITIONS[currentAppointment.status];
+
+  if (!allowedStatuses.includes(status)) {
+    return { result: "invalid_transition" };
+  }
+
+  const updatedAt = new Date().toISOString();
+
+  db.query(UPDATE_APPOINTMENT_STATUS_SQL).run(
+    status,
+    updatedAt,
+    appointmentId
+  );
+
+  return {
+    result: "updated",
+    appointment: {
+      ...currentAppointment,
+      status,
+      updatedAt,
+    },
+  };
 }
 
 function mapAppointmentRow(row: AppointmentRow): Appointment {
