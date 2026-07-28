@@ -41,6 +41,25 @@ const LIST_APPOINTMENTS_BY_BUSINESS_SQL = `
   ORDER BY start_time ASC
 `;
 
+const GET_APPOINTMENT_BY_ID_SQL = `
+  SELECT
+    id,
+    business_id,
+    customer_name,
+    customer_email,
+    customer_phone,
+    service,
+    start_time,
+    end_time,
+    status,
+    notes,
+    created_at,
+    updated_at
+  FROM appointments
+  WHERE id = ?
+  LIMIT 1
+`;
+
 interface AppointmentRow {
   id: string;
   business_id: string;
@@ -103,6 +122,17 @@ export function listAppointmentsByBusiness(
     .all(businessId);
 
   return rows.map(mapAppointmentRow);
+}
+
+export function getAppointmentById(
+  db: Database,
+  appointmentId: string
+): Appointment | null {
+  const row = db
+    .query<AppointmentRow, [string]>(GET_APPOINTMENT_BY_ID_SQL)
+    .get(appointmentId);
+
+  return row ? mapAppointmentRow(row) : null;
 }
 
 function mapAppointmentRow(row: AppointmentRow): Appointment {
