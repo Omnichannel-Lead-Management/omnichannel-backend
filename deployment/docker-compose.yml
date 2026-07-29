@@ -1,5 +1,5 @@
-# Core stack: Gateway + Routing + Chatbot + Dashboard + edge proxy
-# Lead Manager / Appointment / Notification omitted for now.
+# Core stack: Gateway + Routing + Chatbot + Appointment + Dashboard + edge proxy
+# Lead Manager / Notification omitted for now.
 name: omnichannel-core
 
 services:
@@ -32,8 +32,8 @@ services:
       GEMINI_API_KEY: ${GEMINI_API_KEY:-}
       GEMINI_MODEL: ${GEMINI_MODEL:-gemini-2.5-flash}
       CHATBOT_ENGINE_URL: http://chatbot:3003
+      APPOINTMENT_SERVICE_URL: http://appointment:3005
       LEAD_MANAGER_URL: http://127.0.0.1:9
-      APPOINTMENT_SERVICE_URL: http://127.0.0.1:9
     healthcheck:
       test:
         [
@@ -75,6 +75,41 @@ services:
           "run",
           "-e",
           "fetch('http://127.0.0.1:3003/health').then(r => r.ok ? process.exit(0) : process.exit(1)).catch(() => process.exit(1))"
+        ]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 20s
+
+  appointment:
+    build: ../apps/appointment
+    restart: unless-stopped
+    ports:
+      - "3005:3005"
+    environment:
+      PORT: 3005
+      NODE_ENV: production
+      DATABASE_PATH: /data/appointments.db
+      # Gemini pulls the date/time/service out of the customer's message.
+      GOOGLE_CLOUD_PROJECT: ${GOOGLE_CLOUD_PROJECT:-}
+      GOOGLE_CLOUD_LOCATION: ${GOOGLE_CLOUD_LOCATION:-us-central1}
+      GCE_METADATA_HOST: ${GCE_METADATA_HOST:-}
+      GEMINI_API_KEY: ${GEMINI_API_KEY:-}
+      GEMINI_MODEL: ${GEMINI_MODEL:-gemini-2.5-flash}
+      # Customers say "3pm" meaning their local time; stored rows stay UTC.
+      BUSINESS_UTC_OFFSET_MINUTES: ${BUSINESS_UTC_OFFSET_MINUTES:-0}
+      BUSINESS_OPEN_HOUR: ${BUSINESS_OPEN_HOUR:-9}
+      BUSINESS_CLOSE_HOUR: ${BUSINESS_CLOSE_HOUR:-17}
+    volumes:
+      - appointment_data:/data
+    healthcheck:
+      test:
+        [
+          "CMD",
+          "bun",
+          "run",
+          "-e",
+          "fetch('http://127.0.0.1:3005/health').then(r => r.ok ? process.exit(0) : process.exit(1)).catch(() => process.exit(1))"
         ]
       interval: 30s
       timeout: 10s
@@ -152,3 +187,4 @@ services:
 volumes:
   postgres_data:
   chatbot_data:
+  appointment_data:

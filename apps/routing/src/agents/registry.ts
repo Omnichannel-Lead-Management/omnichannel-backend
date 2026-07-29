@@ -136,6 +136,10 @@ export const agentRegistry: Record<string, AgentConfig> = {
         message: summary,
         messenger_id: req.messenger_id,
         business_id: req.business_id,
+        platform: req.platform,
+        // Bookings are stored against a customer name, so pass through whatever
+        // the platform knows rather than filing everyone as "Customer".
+        user_info: req.user_info,
         language: resolveLanguageCode(req),
         language_tag: resolveLanguageTag(req),
         platform_capabilities: req.platform_capabilities ?? DEFAULT_CAPABILITIES,

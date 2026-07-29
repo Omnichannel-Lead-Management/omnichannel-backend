@@ -4,6 +4,11 @@ import type {
   AppointmentStatus,
   CreateAppointmentInput,
 } from "../types/appointment";
+import {
+  closeHourLocal,
+  localDateTimeToUtc,
+  openHourLocal,
+} from "./business-hours";
 
 const INSERT_APPOINTMENT_SQL = `
   INSERT INTO appointments (
@@ -90,9 +95,8 @@ const ACTIVE_APPOINTMENTS_FOR_DATE_SQL = `
   ORDER BY start_time ASC
 `;
 
-const OPENING_HOUR_UTC = 9;
-const CLOSING_HOUR_UTC = 17;
 const SLOT_DURATION_MS = 30 * 60 * 1000;
+const HOUR_MS = 60 * 60 * 1000;
 
 const ALLOWED_STATUS_TRANSITIONS: Record<
   AppointmentStatus,
@@ -235,14 +239,15 @@ export function getAvailableAppointmentSlots(
   businessId: string,
   date: string
 ): AppointmentAvailabilitySlot[] {
-  const requestedDateStart = new Date(`${date}T00:00:00.000Z`);
-  const followingDateStart = new Date(
-    requestedDateStart.getTime() + 24 * 60 * 60 * 1000
-  );
-  const openingTime = new Date(requestedDateStart);
-  openingTime.setUTCHours(OPENING_HOUR_UTC, 0, 0, 0);
-  const closingTime = new Date(requestedDateStart);
-  closingTime.setUTCHours(CLOSING_HOUR_UTC, 0, 0, 0);
+  // `date` is a business-local calendar date. Deriving the window from the same
+  // opening-hours config the booking path validates against keeps the two in
+  // step — otherwise a customer could be offered a slot that booking rejects.
+  const requestedDateStart = localDateTimeToUtc(date, "00:00");
+  if (!requestedDateStart) return [];
+
+  const followingDateStart = new Date(requestedDateStart.getTime() + 24 * HOUR_MS);
+  const openingTime = new Date(requestedDateStart.getTime() + openHourLocal() * HOUR_MS);
+  const closingTime = new Date(requestedDateStart.getTime() + closeHourLocal() * HOUR_MS);
 
   const activeAppointments = db
     .query<ActiveAppointmentTimeRow, [string, string, string]>(
