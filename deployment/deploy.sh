@@ -14,7 +14,7 @@ fi
 
 SERVICES=("$@")
 if [[ ${#SERVICES[@]} -eq 0 ]]; then
-  SERVICES=(gateway routing chatbot appointment dashboard edge)
+  SERVICES=(gateway routing chatbot lead-manager notification appointment dashboard edge)
 fi
 
 if [[ ! -f .env ]]; then

@@ -1,5 +1,5 @@
-# Core stack: Gateway + Routing + Chatbot + Appointment + Dashboard + edge proxy
-# Lead Manager / Notification omitted for now.
+# Core stack: Gateway + Routing + Chatbot + Lead Manager + Notification +
+# Appointment + Dashboard + edge proxy.
 name: omnichannel-core
 
 services:
@@ -33,7 +33,7 @@ services:
       GEMINI_MODEL: ${GEMINI_MODEL:-gemini-2.5-flash}
       CHATBOT_ENGINE_URL: http://chatbot:3003
       APPOINTMENT_SERVICE_URL: http://appointment:3005
-      LEAD_MANAGER_URL: http://127.0.0.1:9
+      LEAD_MANAGER_URL: http://lead-manager:3002
     healthcheck:
       test:
         [
@@ -57,7 +57,11 @@ services:
       PORT: 3003
       NODE_ENV: production
       DATABASE_PATH: /data/chatbot.db
-      LEAD_INTEGRATION_ENABLED: "false"
+      # Lead Manager is deployed now, so chatbot conversations can capture leads.
+      # leadClient is best-effort (timeout-guarded, returns null) — if lead-manager
+      # is down the customer still gets their reply.
+      LEAD_INTEGRATION_ENABLED: ${LEAD_INTEGRATION_ENABLED:-true}
+      LEAD_MANAGER_URL: http://lead-manager:3002
       APPOINTMENT_INTEGRATION_ENABLED: "false"
       GOOGLE_CLOUD_PROJECT: ${GOOGLE_CLOUD_PROJECT:-}
       GOOGLE_CLOUD_LOCATION: ${GOOGLE_CLOUD_LOCATION:-us-central1}
@@ -75,6 +79,62 @@ services:
           "run",
           "-e",
           "fetch('http://127.0.0.1:3003/health').then(r => r.ok ? process.exit(0) : process.exit(1)).catch(() => process.exit(1))"
+        ]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 20s
+
+  lead-manager:
+    build: ../apps/lead-manager
+    restart: unless-stopped
+    ports:
+      - "3002:3002"
+    environment:
+      PORT: 3002
+      NODE_ENV: production
+      DATABASE_PATH: /data/leads.db
+      NOTIFICATION_SERVICE_URL: http://notification:3004
+      # Routing's /chat body carries no business_id yet, so leads created from
+      # the lead_qualification intent land on this tenant. Keep it aligned with
+      # the business the dashboard is built against.
+      DEFAULT_BUSINESS_ID: ${DASHBOARD_BUSINESS_ID:-biz_demo_salon}
+      AGENT_POOL: ${AGENT_POOL:-agent_1,agent_2,agent_3}
+    volumes:
+      - lead_data:/data
+    healthcheck:
+      test:
+        [
+          "CMD",
+          "bun",
+          "run",
+          "-e",
+          "fetch('http://127.0.0.1:3002/health').then(r => r.ok ? process.exit(0) : process.exit(1)).catch(() => process.exit(1))"
+        ]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 20s
+
+  # Stub service: answers 200 with "not yet implemented" and sends nothing.
+  # Deployed so Lead Manager's best-effort notify hook has a real peer instead
+  # of logging a connection-refused warning on every lead.
+  notification:
+    build: ../apps/notification
+    restart: unless-stopped
+    ports:
+      - "3004:3004"
+    environment:
+      PORT: 3004
+      NODE_ENV: production
+    healthcheck:
+      test:
+        [
+          "CMD",
+          "bun",
+          "run",
+          "-e",
+          "fetch('http://127.0.0.1:3004/health').then(r => r.ok ? process.exit(0) : process.exit(1)).catch(() => process.exit(1))"
         ]
       interval: 30s
       timeout: 10s
@@ -188,3 +248,4 @@ volumes:
   postgres_data:
   chatbot_data:
   appointment_data:
+  lead_data:
