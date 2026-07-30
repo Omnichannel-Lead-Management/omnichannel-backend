@@ -1,113 +1,138 @@
-# Omnichannel Lead Management - Deployment
+# Omnichannel Lead Management — Deployment
 
-## Overview
-This repository contains the Docker Compose deployment for the Omnichannel Lead Management Platform.
+Docker Compose deployment for the whole platform. `docker-compose.yml` here is the
+single source of truth: it builds the backend apps from `../apps/*` and the two
+sibling repos (`../../chatbot-builder`, `../../web-dashboard`) checked out next to
+this one.
 
-## CI/CD Status
+## Services
 
-| Service | Build Status |
-|---------|-------------|
-| Messaging Orchestrator | [![Build](https://github.com/Rexosphere/Hemas-Message-Orchestrator/actions/workflows/docker-publish.yml/badge.svg)](https://github.com/Rexosphere/Hemas-Message-Orchestrator/actions/workflows/docker-publish.yml) |
-| Routing Agent | [![Build](https://github.com/Rexosphere/Hemas-Routing-Agent/actions/workflows/docker-publish.yml/badge.svg)](https://github.com/Rexosphere/Hemas-Routing-Agent/actions/workflows/docker-publish.yml) |
-| Product Agent | [![Build](https://github.com/Rexosphere/Hemas-Product-Agent/actions/workflows/docker.yml/badge.svg)](https://github.com/Rexosphere/Hemas-Product-Agent/actions/workflows/docker.yml) |
-| Ordering Agent | [![Build](https://github.com/Rexosphere/Hemas_Ordering_System/actions/workflows/docker.yml/badge.svg)](https://github.com/Rexosphere/Hemas_Ordering_System/actions/workflows/docker.yml) |
-| Complaint Agent | [![Build](https://github.com/Rexosphere/Hemas-Complaint-Agent/actions/workflows/docker.yml/badge.svg)](https://github.com/Rexosphere/Hemas-Complaint-Agent/actions/workflows/docker.yml) |
-| Photo Agent | [![Build](https://github.com/Rexosphere/Hemas-Photo-Agent/actions/workflows/docker.yml/badge.svg)](https://github.com/Rexosphere/Hemas-Photo-Agent/actions/workflows/docker.yml) |
-| MCP Server | [![Build](https://github.com/Rexosphere/Hemas-MCP/actions/workflows/docker-publish.yml/badge.svg)](https://github.com/Rexosphere/Hemas-MCP/actions/workflows/docker-publish.yml) |
-| Recommender | [![Build](https://github.com/Rexosphere/Hemas-Recommender/actions/workflows/docker.yml/badge.svg)](https://github.com/Rexosphere/Hemas-Recommender/actions/workflows/docker.yml) |
-| Vision API | [![Build](https://github.com/Rexosphere/AI-vision-for-product-search/actions/workflows/docker-release.yml/badge.svg)](https://github.com/Rexosphere/AI-vision-for-product-search/actions/workflows/docker-release.yml) |
-| Analytics Service | [![Build](https://github.com/Rexosphere/Hemas-Analytics-Service/actions/workflows/docker-publish.yml/badge.svg)](https://github.com/Rexosphere/Hemas-Analytics-Service/actions/workflows/docker-publish.yml) |
-| Notification Service | [![Build](https://github.com/Rexosphere/Hemas-Notification-Service/actions/workflows/docker-publish.yml/badge.svg)](https://github.com/Rexosphere/Hemas-Notification-Service/actions/workflows/docker-publish.yml) |
+| Service | Port | Built from | Storage |
+|---|---|---|---|
+| `postgres` | — (internal) | `postgres:16-alpine` | `postgres_data` |
+| `gateway` | 3000 | `../apps/gateway` | postgres |
+| `routing` | 3001 | `../apps/routing` | — |
+| `lead-manager` | 3002 | `../apps/lead-manager` | `lead_data` (SQLite) |
+| `chatbot` | 3003 | `../../chatbot-builder` | `chatbot_data` (SQLite) |
+| `notification` | 3004 | `../apps/notification` | — |
+| `appointment` | 3005 | `../apps/appointment` | `appointment_data` (SQLite) |
+| `dashboard` | 5173 → 80 | `../../web-dashboard` | — |
+| `edge` | 80 / 443 | `nginx:alpine` | — |
 
-## What This Deploys
-- messaging-orchestrator
-- routing-agent
-- product-agent
-- ordering-agent
-- complaint-agent
-- photo-agent
-- product-mcp
-- recommender-service
-- vision-service
-- pocketbase
-- analytics-service
-- notification-service
+Public traffic goes through `edge` only; the per-service host ports are for
+debugging. `notification` is still a stub — it answers 200 and sends nothing.
+
+## Call graph
+
+```
+channel → gateway :3000 → routing :3001 ─┬→ chatbot :3003 ──→ lead-manager :3002
+                                         ├→ appointment :3005
+                                         └→ lead-manager :3002   (lead_qualification)
+                                                    └→ notification :3004 (best-effort)
+dashboard :80 ──(via edge)──> gateway :3000
+```
+
+`chatbot → lead-manager` and `lead-manager → notification` are both best-effort:
+timeout-guarded, never fatal. A lead is still created if notification is down, and
+a customer still gets a reply if lead-manager is down.
 
 ## Prerequisites
-- Docker 24+
-- Docker Compose v2
-- Access to required API keys and external services:
-  - Vertex AI (`aiplatform.googleapis.com`) enabled on the GCP project, with the
-    host VM's service account granted `roles/aiplatform.user`. Gemini is reached
-    through Vertex AI using the VM's Application Default Credentials — set
-    `GOOGLE_CLOUD_PROJECT` in `.env`; no API key is stored.
-  - Azure Vision and Azure Search (for vision service)
-  - Qdrant (for complaint retrieval)
 
-## Setup
+- Docker 24+ and Docker Compose v2
+- `deployment/.env` — **not synced by CI**, it lives only on the host. Create it by
+  hand on a new machine (see "Environment" below).
+- Vertex AI (`aiplatform.googleapis.com`) enabled on the GCP project, with the host
+  VM's service account granted `roles/aiplatform.user`. Gemini is reached through
+  Vertex AI using the VM's Application Default Credentials — set
+  `GOOGLE_CLOUD_PROJECT`; no API key is stored in production.
+- TLS: `EDGE_CERT_DIR` must contain `origin.crt` / `origin.key`, kept **outside** the
+  synced tree so a deploy's `rsync --delete` cannot remove them. Cloudflare fronts
+  `cache.us.kg` and connects to the origin over HTTPS.
+
+## Environment
+
+Keys read by `docker-compose.yml` (all optional unless noted; defaults in parentheses):
+
 ```bash
-cd deployment
-cp .env.example .env
+GOOGLE_CLOUD_PROJECT=            # required for Vertex AI
+GOOGLE_CLOUD_LOCATION=           # (us-central1)
+GCE_METADATA_HOST=               # 169.254.169.254 inside Docker — see note below
+GEMINI_API_KEY=                  # local-dev fallback only
+GEMINI_MODEL=                    # (gemini-2.5-flash)
+LLM_ROUTING_ENABLED=             # (true)
+TELEGRAM_BOT_TOKEN=
+PUBLIC_BASE_URL=                 # (https://cache.us.kg)
+CORS_ALLOWED_ORIGINS=            # (https://cache.us.kg,http://cache.us.kg)
+AGENT_AUTH_MODE=                 # (none)
+DASHBOARD_BUSINESS_ID=           # also the lead-manager DEFAULT_BUSINESS_ID
+DASHBOARD_BUSINESS_NAME=
+DASHBOARD_BUSINESS_SECTOR=
+DASHBOARD_BUSINESS_EMAIL=
+LEAD_INTEGRATION_ENABLED=        # (true) chatbot → lead-manager capture
+AGENT_POOL=                      # (agent_1,agent_2,agent_3) round-robin assignment
+BUSINESS_UTC_OFFSET_MINUTES=     # (0)
+BUSINESS_OPEN_HOUR=              # (9)
+BUSINESS_CLOSE_HOUR=             # (17)
+EDGE_CERT_DIR=                   # (./certs)
 ```
 
-Fill `.env` values before startup.
+> **Docker + Vertex AI:** containers need `GCE_METADATA_HOST=169.254.169.254` so
+> google-auth-library reaches the GCE metadata server by IP — Docker's resolver may
+> not answer `metadata.google.internal`.
 
-## Run
+## Deploying
+
+Normal path is CI: pushing to `main` in any of the three repos runs that repo's
+`.github/workflows/deploy.yml`, which rsyncs the tree to the host and runs
+`deploy.sh`. On the host, by hand:
+
 ```bash
-docker compose up --build -d
+cd ~/omnichannel/omnichannel-backend/deployment
+./deploy.sh                       # all services
+./deploy.sh gateway routing       # just these
 ```
 
-Check status:
+`deploy.sh` takes a flock so two deploys can't overlap, runs
+`docker compose up -d --build`, then **reloads the edge nginx config** if it passes
+`nginx -t`. A failed test aborts the deploy and leaves the running config in place.
+
+## The edge proxy and container IPs
+
+`edge-conf/default.conf` resolves upstreams **at request time**
+(`resolver 127.0.0.11` + `proxy_pass http://$gateway`) rather than through an
+`upstream` block. This is deliberate. nginx resolves an `upstream` name once at
+config load; every later `docker compose up` that recreates `gateway` or `dashboard`
+gives it a new container IP, and the edge — which is not recreated on every deploy —
+keeps dialling the old address and 502s until someone restarts it by hand. Runtime
+resolution makes the edge follow containers across recreates.
+
+The config directory is mounted, not the file, because a deploy's rsync replaces the
+config with a new inode and a single-file bind mount would keep serving stale content.
+
+## Checks
+
 ```bash
-docker compose ps
-docker compose logs -f
+docker compose --env-file .env ps
+docker compose --env-file .env logs -f lead-manager
+
+curl -s localhost:3000/api/messaging/health
+curl -s localhost:3001/health
+curl -s localhost:3002/health
+curl -s localhost:3003/health
+curl -s localhost:3004/health
+curl -s localhost:3005/health
+curl -s https://cache.us.kg/          # through Cloudflare + edge
 ```
 
-Stop:
+## Stop / reset
+
 ```bash
-docker compose down
+docker compose --env-file .env down       # stop
+docker compose --env-file .env down -v    # stop AND destroy all SQLite/postgres volumes
 ```
 
-Reset volumes:
-```bash
-docker compose down -v
-```
+## Not deployed here
 
-## Service Ports
-- `3000` Messaging Orchestrator
-- `3001` Routing Agent
-- `3002` Product Agent
-- `3003` Ordering System
-- `3004` Complaint Agent
-- `3005` Photo Agent
-- `8001` MCP Server
-- `8002` Recommender
-- `8003` Vision API
-- `8007` Notification Service
-- `8008` Analytics Service
-- `8090` PocketBase
-
-## Shared Data
-`shared_data` volume is mounted to allow services to read shared SQLite files efficiently:
-- `/data/orchestrator.db`
-- `/data/ordering.db`
-- `/data/notifications.db`
-
-## Core Health Endpoints
-- `GET http://localhost:3000/api/health/all`
-- `GET http://localhost:3001/health`
-- `GET http://localhost:3003/health`
-- `GET http://localhost:8002/health`
-- `GET http://localhost:8007/health`
-- `GET http://localhost:8008/analytics/health`
-
-## How It Works
-1. Messaging orchestrator receives incoming channel traffic (web, telegram, whatsapp).
-2. Routing agent classifies intent and forwards requests to specialist agents.
-3. Specialist agents call MCP/tools and return structured responses.
-4. Ordering and notification services handle order lifecycle and nudges.
-5. Analytics service reads operational data and provides dashboard APIs.
-
-## Notes
-- Keep `.env` consistent with service `.env.example` files across repos.
-- If you use image tags from a registry, ensure the tags are updated and available.
+`../evolution-api/` (self-hosted WhatsApp via Baileys) is a separate opt-in stack
+with its own compose file, excluded from CI sync. See its README — it uses an
+unofficial protocol that can get numbers banned.
