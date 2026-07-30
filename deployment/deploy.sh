@@ -27,5 +27,21 @@ docker ps -a --format '{{.Names}}' | grep -E '^[0-9a-f]+_omnichannel-core-' | xa
 
 echo "==> Deploying services: ${SERVICES[*]}"
 docker compose --env-file .env up -d --build --remove-orphans "${SERVICES[@]}"
+
+# The edge config is a bind-mounted directory, so editing it does not change the
+# service definition and `up -d` will not recreate the container — nginx would
+# keep serving the old config. Reload it explicitly, but only after `nginx -t`
+# passes: a failed test leaves the running config untouched rather than taking
+# the site down.
+if docker compose --env-file .env ps --status running --services 2>/dev/null | grep -qx edge; then
+  echo "==> Reloading edge nginx config"
+  if docker compose --env-file .env exec -T edge nginx -t; then
+    docker compose --env-file .env exec -T edge nginx -s reload
+  else
+    echo "!! edge nginx config test FAILED — keeping the previously loaded config" >&2
+    exit 1
+  fi
+fi
+
 docker compose --env-file .env ps
 echo "==> Deploy finished"
