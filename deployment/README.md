@@ -131,8 +131,16 @@ docker compose --env-file .env down       # stop
 docker compose --env-file .env down -v    # stop AND destroy all SQLite/postgres volumes
 ```
 
-## Not deployed here
+## WhatsApp (evolution-api)
 
-`../evolution-api/` (self-hosted WhatsApp via Baileys) is a separate opt-in stack
-with its own compose file, excluded from CI sync. See its README — it uses an
-unofficial protocol that can get numbers banned.
+`../evolution-api/` is a separate compose project (evolution-api + its own postgres
+and redis) that `deploy.sh` brings up **only if `../evolution-api/.env` exists on the
+host** — that file holds the master API key and is never synced by CI. Its container
+joins this stack's network so the gateway reaches it at `http://evolution-api:8080`.
+
+To enable it on a host: create `../evolution-api/.env` from `.env.example` with a
+real `POSTGRES_PASSWORD` and `AUTHENTICATION_API_KEY`, then set the *same* key as
+`EVOLUTION_API_KEY` in `deployment/.env`. See `../evolution-api/README.md`.
+
+Note it speaks the unofficial WhatsApp Web protocol (Baileys), which can get numbers
+banned — fine for a demo, a real risk to disclose to a vendor relying on their number.

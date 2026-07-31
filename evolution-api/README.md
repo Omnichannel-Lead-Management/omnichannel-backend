@@ -68,12 +68,38 @@ curl -X DELETE http://localhost:8080/instance/delete/biz_a1b2c3 -H "apikey: <AUT
 
 If #2093 gets fixed upstream and you want the UI back, add an `evolution-manager` service back to `docker-compose.yml` pointing at a fixed tag once one exists.
 
-## Not wired into `apps/gateway` yet
+## Wired into `apps/gateway`
 
-This is just the standalone container + database — `apps/gateway` doesn't call it yet. When that's ready, the plan is:
+The gateway drives this automatically — you normally do **not** create instances by
+hand. `BusinessRegistry.connectWhatsAppEvolution()` does all three steps:
 
-1. Create an instance per registered business via `POST /instance/create` (instance name = `business_id`).
-2. Point that instance's webhook at a new gateway endpoint (e.g. `/webhook/evolution/:business_id`), set per-instance via the API/Manager UI — not the `WEBHOOK_GLOBAL_*` env vars, which apply to every instance.
-3. Send outbound messages via `POST /message/sendText/:instanceName` using the business's stored instance name, instead of the Meta Graph API calls in `apps/gateway/src/platforms/whatsapp.ts`.
+1. `POST /instance/create` with `instanceName = business_id`.
+2. `POST /webhook/set/:instance` pointing at `${PUBLIC_BASE_URL}/webhook/evolution/:business_id`
+   (per-instance, not the `WEBHOOK_GLOBAL_*` env vars — those apply to every instance).
+3. Outbound sends go through `EvolutionAdapter` → `POST /message/sendText/:instance`.
 
-That adapter rewrite is a separate piece of work — ask when you're ready to wire it up.
+The instance name and token are stored on the business row, and the QR comes back
+from the connect endpoint for the vendor to scan.
+
+### Deployment
+
+Deployed by `deployment/deploy.sh` as a **separate compose project**, but only if
+`evolution-api/.env` exists on the host — that file holds the master API key and is
+never synced by CI. A host without it just skips this stack.
+
+`evolution-api` joins the core stack's network (`omnichannel-core_default`) as well
+as its own, so the gateway reaches it at `http://evolution-api:8080`. Its postgres
+and redis stay private to `evolution-net`.
+
+Two values must line up by hand on the host:
+
+| File | Key |
+|---|---|
+| `evolution-api/.env` | `AUTHENTICATION_API_KEY` — the master key |
+| `deployment/.env` | `EVOLUTION_API_KEY` — must be the **same** string |
+
+Also set `SERVER_URL` in `evolution-api/.env` to the address the container is
+actually reachable at (not `localhost`) — it is used in generated media links.
+
+Without `EVOLUTION_API_KEY` the gateway's WhatsApp connect endpoints throw
+"EVOLUTION_API_KEY is not configured"; nothing else is affected.
