@@ -19,6 +19,8 @@ import { businessesRoutes } from "./routes/businesses.routes";
 import { websocketRoutes } from "./routes/websocket.routes";
 import { agentWebsocketRoutes } from "./routes/agent.websocket.routes";
 import { agentsRoutes } from "./routes/agents.routes";
+import { leadsRoutes } from "./routes/leads.routes";
+import { appointmentsProxyRoutes } from "./routes/appointments.proxy.routes";
 import { healthRoutes } from "./routes/health.routes";
 import {
   describeAllowedCorsOrigins,
@@ -104,6 +106,8 @@ const app = new Elysia()
   .use(messagingRoutes)
   .use(uploadRoutes)
   .use(agentsRoutes)
+  .use(leadsRoutes)
+  .use(appointmentsProxyRoutes)
   .use(businessesRoutes)
   .use(healthRoutes)
   .use(telegramRoutes)

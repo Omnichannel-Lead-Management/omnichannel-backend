@@ -187,6 +187,10 @@ services:
       DATABASE_URL: postgres://postgres:postgres@postgres:5432/messaging
       DATABASE_SSL: "false"
       ROUTING_AGENT_URL: http://routing:3001/chat
+      # The edge only exposes /api/ on this gateway, so leads and appointments
+      # are proxied through it rather than published as separate origins.
+      LEAD_MANAGER_URL: http://lead-manager:3002
+      APPOINTMENT_SERVICE_URL: http://appointment:3005
       TELEGRAM_BOT_TOKEN: ${TELEGRAM_BOT_TOKEN:-}
       PUBLIC_BASE_URL: ${PUBLIC_BASE_URL:-https://cache.us.kg}
       CORS_ALLOWED_ORIGINS: ${CORS_ALLOWED_ORIGINS:-https://cache.us.kg,http://cache.us.kg}
