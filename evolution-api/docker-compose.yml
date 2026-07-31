@@ -36,6 +36,7 @@ services:
         condition: service_healthy
     networks:
       - evolution-net
+      - omnichannel-core
 
   evolution-redis:
     image: redis:7-alpine
@@ -71,8 +72,17 @@ services:
       retries: 5
 
 networks:
+  # Private to this stack: only evolution-api talks to its own postgres/redis.
   evolution-net:
     driver: bridge
+
+  # The core stack's network, joined so apps/gateway can reach this container by
+  # name (EVOLUTION_API_URL=http://evolution-api:8080) instead of going back out
+  # through the published host port. Created by deployment/docker-compose.yml, so
+  # the core stack has to be up first — deploy.sh already orders it that way.
+  omnichannel-core:
+    external: true
+    name: omnichannel-core_default
 
 volumes:
   evolution_instances:

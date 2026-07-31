@@ -191,6 +191,13 @@ services:
       PUBLIC_BASE_URL: ${PUBLIC_BASE_URL:-https://cache.us.kg}
       CORS_ALLOWED_ORIGINS: ${CORS_ALLOWED_ORIGINS:-https://cache.us.kg,http://cache.us.kg}
       AGENT_AUTH_MODE: ${AGENT_AUTH_MODE:-none}
+      # Self-hosted WhatsApp. The evolution-api container joins this network from
+      # its own compose file (../evolution-api), so the name resolves once that
+      # stack is up. Without EVOLUTION_API_KEY the WhatsApp connect endpoints
+      # throw "EVOLUTION_API_KEY is not configured" and the rest of the gateway
+      # is unaffected.
+      EVOLUTION_API_URL: ${EVOLUTION_API_URL:-http://evolution-api:8080}
+      EVOLUTION_API_KEY: ${EVOLUTION_API_KEY:-}
     depends_on:
       postgres:
         condition: service_healthy

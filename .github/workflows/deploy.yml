@@ -61,7 +61,7 @@ jobs:
             --exclude 'node_modules' \
             --exclude '**/node_modules' \
             --exclude 'data' \
-            --exclude 'evolution-api' \
+            --exclude 'evolution-api/.env' \
             --exclude 'deployment/.env' \
             ./ "${USER}@${HOST}:${BASE}/omnichannel-backend/"
 

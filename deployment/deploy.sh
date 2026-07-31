@@ -43,5 +43,22 @@ if docker compose --env-file .env ps --status running --services 2>/dev/null | g
   fi
 fi
 
+# Self-hosted WhatsApp (evolution-api) is a separate compose project with its own
+# postgres/redis. Opt-in: it is deployed only once its .env exists on this host.
+# That file holds the master API key and is never synced by CI, so a host that
+# has not been set up for WhatsApp simply skips this.
+EVOLUTION_DIR="$ROOT/../evolution-api"
+if [[ -f "$EVOLUTION_DIR/.env" ]]; then
+  echo "==> Deploying evolution-api (WhatsApp)"
+  docker compose --project-directory "$EVOLUTION_DIR" \
+    -f "$EVOLUTION_DIR/docker-compose.yml" \
+    --env-file "$EVOLUTION_DIR/.env" up -d
+  docker compose --project-directory "$EVOLUTION_DIR" \
+    -f "$EVOLUTION_DIR/docker-compose.yml" \
+    --env-file "$EVOLUTION_DIR/.env" ps
+else
+  echo "==> Skipping evolution-api — no $EVOLUTION_DIR/.env on this host"
+fi
+
 docker compose --env-file .env ps
 echo "==> Deploy finished"
