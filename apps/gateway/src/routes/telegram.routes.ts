@@ -13,8 +13,12 @@ import {
 } from "../middleware/correlationId";
 import { messageOrchestrator } from "../services/MessageOrchestrator";
 import { TelegramAdapter, formatTelegramWebhook } from "../platforms/TelegramAdapter";
-import { uploadToStorage } from "../services/StorageService";
-import { transcribeAudioFile, uploadVoiceToStorage } from "../services/VoiceService";
+import {
+  transcribeVoice,
+  describeCustomerImage,
+  photoMessageText,
+  voiceMessageText
+} from "../services/MediaUnderstanding";
 import { getBusinessById } from "../services/BusinessRegistry";
 
 const telegramAdapter = new TelegramAdapter();
@@ -49,85 +53,72 @@ async function processTelegramMessageAsync(
   const mutableMessage = formattedMessage as Record<string, unknown> & {
     _photo_file_id?: string;
     _audio_file_id?: string;
-    image_url?: string;
-    audio_url?: string;
+    _caption?: string;
     message?: string;
     language?: string;
+    business_id?: string;
+    metadata?: Record<string, unknown>;
   };
 
   try {
-    // If a photo was attached, download from Telegram and upload to storage
+    // Photos and voice notes are resolved to TEXT here, at the edge. Everything
+    // downstream (routing, chatbot, lead-manager, appointment) speaks plain text,
+    // so this is the only place that has to know media exists.
     if (mutableMessage._photo_file_id) {
-      try {
-        const fileData = await adapter.downloadFile(mutableMessage._photo_file_id, correlationId);
-        if (fileData) {
-          const imageUrl = await uploadToStorage(
-            fileData.data,
-            fileData.filename,
-            fileData.mimeType,
-            correlationId
-          );
-          if (imageUrl) {
-            mutableMessage.image_url = imageUrl;
-            logWithCorrelation(correlationId, "MEDIA_UPLOADED", `platform=telegram image_url=${imageUrl}`);
-          } else {
-            logWithCorrelation(correlationId, "MEDIA_UPLOAD_SKIPPED", "storage not configured", "warn");
+      const fileData = await adapter.downloadFile(mutableMessage._photo_file_id, correlationId);
+      if (fileData) {
+        // The tenant's sector shapes the description — a salon and a photographer
+        // want different things noticed in the same photo.
+        let sector: string | undefined;
+        if (typeof mutableMessage.business_id === "string") {
+          try {
+            const business = await getBusinessById(mutableMessage.business_id);
+            sector = business?.sector ?? undefined;
+          } catch {
+            sector = undefined;
           }
         }
-      } catch (err) {
-        const errorMessage = err instanceof Error ? err.message : "Unknown error";
-        logWithCorrelation(correlationId, "MEDIA_PROCESS_FAILED", errorMessage, "error");
+
+        const understanding = await describeCustomerImage(fileData.data, fileData.mimeType, sector);
+        mutableMessage.message = photoMessageText(understanding, mutableMessage._caption);
+        mutableMessage.metadata = { ...(mutableMessage.metadata ?? {}), type: "photo" };
+
+        logWithCorrelation(
+          correlationId,
+          understanding ? "MEDIA_UNDERSTOOD" : "MEDIA_UNREADABLE",
+          `platform=telegram kind=photo description="${understanding?.description ?? "-"}"`,
+          understanding ? "log" : "warn"
+        );
+      } else {
+        mutableMessage.message = photoMessageText(null, mutableMessage._caption);
+        mutableMessage.metadata = { ...(mutableMessage.metadata ?? {}), type: "photo" };
+        logWithCorrelation(correlationId, "MEDIA_DOWNLOAD_FAILED", "platform=telegram kind=photo", "warn");
       }
       delete mutableMessage._photo_file_id;
     }
 
-    // If a voice/audio was attached, download from Telegram and upload to voice storage
     if (mutableMessage._audio_file_id) {
-      try {
-        const fileData = await adapter.downloadFile(mutableMessage._audio_file_id, correlationId);
-        if (fileData) {
-          try {
-            const sttResult = await transcribeAudioFile(
-              fileData.data,
-              fileData.filename,
-              fileData.mimeType,
-              correlationId
-            );
-            if (sttResult?.text) {
-              mutableMessage.message = sttResult.text;
-              if (!mutableMessage.language) {
-                mutableMessage.language = sttResult.language;
-              }
-              logWithCorrelation(
-                correlationId,
-                "VOICE_STT",
-                `platform=telegram transcription="${sttResult.text}" lang=${sttResult.language}`
-              );
-            }
-          } catch (err) {
-            const errorMessage = err instanceof Error ? err.message : "Unknown error";
-            logWithCorrelation(correlationId, "VOICE_STT_ERROR", `platform=telegram ${errorMessage}`, "error");
-          }
+      const fileData = await adapter.downloadFile(mutableMessage._audio_file_id, correlationId);
+      if (fileData) {
+        const transcript = await transcribeVoice(fileData.data, fileData.mimeType);
+        mutableMessage.message = voiceMessageText(transcript, mutableMessage._caption);
+        mutableMessage.metadata = { ...(mutableMessage.metadata ?? {}), type: "voice" };
 
-          const audioUrl = await uploadVoiceToStorage(
-            fileData.data,
-            fileData.filename,
-            fileData.mimeType,
-            correlationId
-          );
-          if (audioUrl) {
-            mutableMessage.audio_url = audioUrl;
-            logWithCorrelation(correlationId, "MEDIA_UPLOADED", `platform=telegram audio_url=${audioUrl}`);
-          } else {
-            logWithCorrelation(correlationId, "MEDIA_UPLOAD_SKIPPED", "voice storage not configured", "warn");
-          }
-        }
-      } catch (err) {
-        const errorMessage = err instanceof Error ? err.message : "Unknown error";
-        logWithCorrelation(correlationId, "MEDIA_PROCESS_FAILED", `voice: ${errorMessage}`, "error");
+        logWithCorrelation(
+          correlationId,
+          transcript ? "VOICE_TRANSCRIBED" : "VOICE_UNREADABLE",
+          `platform=telegram transcript="${transcript?.slice(0, 80) ?? "-"}"`,
+          transcript ? "log" : "warn"
+        );
+      } else {
+        mutableMessage.message = voiceMessageText(null, mutableMessage._caption);
+        mutableMessage.metadata = { ...(mutableMessage.metadata ?? {}), type: "voice" };
+        logWithCorrelation(correlationId, "MEDIA_DOWNLOAD_FAILED", "platform=telegram kind=voice", "warn");
       }
       delete mutableMessage._audio_file_id;
     }
+
+    delete mutableMessage._caption;
 
     const result = await messageOrchestrator.processIncomingMessage(
       mutableMessage as unknown as OrchestratorInput

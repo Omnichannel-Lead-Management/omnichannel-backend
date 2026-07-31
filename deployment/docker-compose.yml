@@ -191,6 +191,14 @@ services:
       # are proxied through it rather than published as separate origins.
       LEAD_MANAGER_URL: http://lead-manager:3002
       APPOINTMENT_SERVICE_URL: http://appointment:3005
+      # Gemini reads inbound voice notes and photos here, at the edge, and turns
+      # them into text — so no object storage or speech-to-text service is needed
+      # and every downstream service keeps receiving plain text.
+      GOOGLE_CLOUD_PROJECT: ${GOOGLE_CLOUD_PROJECT:-}
+      GOOGLE_CLOUD_LOCATION: ${GOOGLE_CLOUD_LOCATION:-us-central1}
+      GCE_METADATA_HOST: ${GCE_METADATA_HOST:-}
+      GEMINI_API_KEY: ${GEMINI_API_KEY:-}
+      GEMINI_MODEL: ${GEMINI_MODEL:-gemini-2.5-flash}
       TELEGRAM_BOT_TOKEN: ${TELEGRAM_BOT_TOKEN:-}
       PUBLIC_BASE_URL: ${PUBLIC_BASE_URL:-https://cache.us.kg}
       CORS_ALLOWED_ORIGINS: ${CORS_ALLOWED_ORIGINS:-https://cache.us.kg,http://cache.us.kg}

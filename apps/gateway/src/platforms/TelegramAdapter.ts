@@ -536,7 +536,7 @@ export function formatTelegramWebhook(update: any) {
   const result: Record<string, unknown> = {
     platform: "telegram",
     messenger_id: `tg_${from.id}`,
-    message: message.text || message.caption || "[Voice Message]",
+    message: message.text || message.caption || "",
     first_name: from.first_name,
     last_name: from.last_name,
     username: from.username,
@@ -560,19 +560,27 @@ export function formatTelegramWebhook(update: any) {
     }
   }
 
-  // Attach the largest photo's file_id for async download in the route handler
+  // Media is downloaded and resolved to text by the route handler. The caption
+  // travels separately as `_caption` so it can be kept ALONGSIDE the description
+  // or transcript — it is usually the customer's actual question. The placeholder
+  // set here is only a fallback if understanding fails.
+  const caption = typeof message.caption === "string" ? message.caption : "";
+
   if (message.photo && Array.isArray(message.photo) && message.photo.length > 0) {
     const largest = message.photo[message.photo.length - 1] as { file_id: string };
     result._photo_file_id = largest.file_id;
+    result._caption = caption;
+    if (!message.text) result.message = caption || "[Photo]";
   }
 
-  // Attach voice or audio file_id for async download in the route handler
   if (message.voice?.file_id) {
     result._audio_file_id = message.voice.file_id;
-    result.message = message.caption || "[Voice Message]";
+    result._caption = caption;
+    result.message = caption || "[Voice Message]";
   } else if (message.audio?.file_id) {
     result._audio_file_id = message.audio.file_id;
-    result.message = message.caption || "[Audio Message]";
+    result._caption = caption;
+    result.message = caption || "[Audio Message]";
   }
 
   return result;

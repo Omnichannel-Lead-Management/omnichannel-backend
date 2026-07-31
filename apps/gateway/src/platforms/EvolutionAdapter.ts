@@ -39,6 +39,52 @@ export class EvolutionAdapter implements PlatformAdapter {
     return messenger_id.replace(/^wa_/, "");
   }
 
+  /**
+   * Fetch the bytes of an inbound media message.
+   *
+   * Evolution stores the decrypted media and hands it back as base64 keyed by the
+   * WhatsApp message id — there is no direct file URL to fetch, unlike Telegram.
+   * Returns null on any failure; callers must still answer the customer.
+   */
+  async downloadMedia(
+    messageId: string,
+    requestId?: string
+  ): Promise<{ data: Uint8Array; mimeType: string } | null> {
+    try {
+      const response = await fetch(
+        `${this.apiUrl}/chat/getBase64FromMediaMessage/${this.instanceName}`,
+        {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            apikey: this.apiKey,
+            ...(requestId ? { [CORRELATION_ID_HEADER]: requestId } : {})
+          },
+          body: JSON.stringify({ message: { key: { id: messageId } }, convertToMp4: false })
+        }
+      );
+
+      if (!response.ok) {
+        console.warn(`[evolution] downloadMedia ${messageId} failed: HTTP ${response.status}`);
+        return null;
+      }
+
+      const body = (await response.json()) as { base64?: string; mimetype?: string };
+      if (!body.base64) return null;
+
+      return {
+        data: new Uint8Array(Buffer.from(body.base64, "base64")),
+        mimeType: body.mimetype || "application/octet-stream"
+      };
+    } catch (err) {
+      console.warn(
+        `[evolution] downloadMedia ${messageId} error:`,
+        err instanceof Error ? err.message : err
+      );
+      return null;
+    }
+  }
+
   async sendMessage(
     messenger_id: string,
     message: string,
@@ -200,7 +246,7 @@ export function formatEvolutionWebhook(payload: unknown): Record<string, unknown
     messageText =
       typeof message.imageMessage.caption === "string" && message.imageMessage.caption
         ? message.imageMessage.caption
-        : "[image]";
+        : "[Photo]";
   } else if (isRecord(message.audioMessage)) {
     messageText = "[Voice Message]";
   }
@@ -211,12 +257,24 @@ export function formatEvolutionWebhook(payload: unknown): Record<string, unknown
   const messageId = typeof key.id === "string" ? key.id : "";
   const timestamp = typeof data.messageTimestamp === "number" ? data.messageTimestamp : Date.now() / 1000;
 
+  // Carried so the route handler can fetch the bytes and resolve them to text.
+  const mediaKind = isRecord(message.imageMessage)
+    ? "photo"
+    : isRecord(message.audioMessage)
+      ? "voice"
+      : null;
+  const caption =
+    isRecord(message.imageMessage) && typeof message.imageMessage.caption === "string"
+      ? message.imageMessage.caption
+      : "";
+
   return {
     platform: "whatsapp",
     messenger_id: `wa_${phone}`,
     message: messageText,
     first_name: pushName,
     phone,
+    ...(mediaKind ? { _media_kind: mediaKind, _media_id: messageId, _caption: caption } : {}),
     metadata: {
       from: phone,
       message_id: messageId,

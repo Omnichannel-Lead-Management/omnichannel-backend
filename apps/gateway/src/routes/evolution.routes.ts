@@ -14,7 +14,13 @@ import {
   logWithCorrelation
 } from "../middleware/correlationId";
 import { messageOrchestrator } from "../services/MessageOrchestrator";
-import { formatEvolutionWebhook } from "../platforms/EvolutionAdapter";
+import { formatEvolutionWebhook, EvolutionAdapter } from "../platforms/EvolutionAdapter";
+import {
+  transcribeVoice,
+  describeCustomerImage,
+  photoMessageText,
+  voiceMessageText
+} from "../services/MediaUnderstanding";
 import { getBusinessById } from "../services/BusinessRegistry";
 
 type OrchestratorInput = Parameters<typeof messageOrchestrator.processIncomingMessage>[0];
@@ -38,6 +44,61 @@ function isDuplicateEvolutionMessage(messageId: string): boolean {
 
   seenEvolutionMessageIds.set(messageId, now);
   return false;
+}
+
+/**
+ * Resolve an inbound WhatsApp photo or voice note to text before the orchestrator
+ * sees it, mirroring the Telegram path. Downstream services only ever get text.
+ */
+async function resolveEvolutionMedia(
+  message: Record<string, unknown> & {
+    _media_kind?: string;
+    _media_id?: string;
+    _caption?: string;
+    message?: string;
+    metadata?: Record<string, unknown>;
+  },
+  business: { id: string; sector?: string | null; whatsapp_instance_name?: string | null },
+  correlationId: string
+): Promise<void> {
+  const kind = message._media_kind;
+  const mediaId = message._media_id;
+
+  if (kind && mediaId) {
+    const adapter = new EvolutionAdapter(
+      business.whatsapp_instance_name ?? business.id,
+      process.env.EVOLUTION_API_KEY ?? ""
+    );
+    const file = await adapter.downloadMedia(mediaId, correlationId);
+
+    if (kind === "photo") {
+      const understanding = file
+        ? await describeCustomerImage(file.data, file.mimeType, business.sector ?? undefined)
+        : null;
+      message.message = photoMessageText(understanding, message._caption);
+      message.metadata = { ...(message.metadata ?? {}), type: "photo" };
+      logWithCorrelation(
+        correlationId,
+        understanding ? "MEDIA_UNDERSTOOD" : "MEDIA_UNREADABLE",
+        `platform=whatsapp kind=photo description="${understanding?.description ?? "-"}"`,
+        understanding ? "log" : "warn"
+      );
+    } else if (kind === "voice") {
+      const transcript = file ? await transcribeVoice(file.data, file.mimeType) : null;
+      message.message = voiceMessageText(transcript, message._caption);
+      message.metadata = { ...(message.metadata ?? {}), type: "voice" };
+      logWithCorrelation(
+        correlationId,
+        transcript ? "VOICE_TRANSCRIBED" : "VOICE_UNREADABLE",
+        `platform=whatsapp transcript="${transcript?.slice(0, 80) ?? "-"}"`,
+        transcript ? "log" : "warn"
+      );
+    }
+  }
+
+  delete message._media_kind;
+  delete message._media_id;
+  delete message._caption;
 }
 
 async function processEvolutionMessageAsync(
@@ -128,7 +189,19 @@ export const evolutionRoutes = new Elysia({ prefix: "/webhook" })
           `platform=whatsapp(evolution) business_id=${businessId} messenger_id=${formattedMessage.messenger_id} message_id=${messageId || "unknown"}`
         );
 
-        void processEvolutionMessageAsync(formattedMessage as unknown as OrchestratorInput, correlationId);
+        // Media is resolved to text before dispatch — downstream only sees text.
+        void resolveEvolutionMedia(formattedMessage, business, correlationId)
+          .catch((err) =>
+            logWithCorrelation(
+              correlationId,
+              "MEDIA_PROCESS_FAILED",
+              `platform=whatsapp ${err instanceof Error ? err.message : String(err)}`,
+              "error"
+            )
+          )
+          .finally(() =>
+            processEvolutionMessageAsync(formattedMessage as unknown as OrchestratorInput, correlationId)
+          );
 
         return { ok: true };
       } catch (error) {
