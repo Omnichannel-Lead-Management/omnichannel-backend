@@ -21,6 +21,15 @@ describe("photoMessageText", () => {
     expect(text).toContain("bridal styling");
   });
 
+  test("does not double the full stop when Gemini already ends with one", () => {
+    const text = photoMessageText(
+      { description: "A flag with three horizontal stripes.", intent_hint: "colour reference" },
+      "is this something you do?"
+    );
+    expect(text).not.toContain("..");
+    expect(text).toContain("stripes. They ask:");
+  });
+
   test("says the photo could not be viewed rather than pretending it was", () => {
     const text = photoMessageText(null, "can you do this?");
     expect(text).toContain("could not be viewed");

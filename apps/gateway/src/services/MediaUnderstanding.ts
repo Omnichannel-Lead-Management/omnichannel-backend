@@ -199,7 +199,10 @@ export function photoMessageText(
       : "[The customer sent a photo that could not be viewed and said nothing else]";
   }
 
-  const base = `[Photo] The customer sent a photo showing: ${understanding.description}.`;
+  // Gemini usually ends the description with a full stop; adding another gives
+  // "…yellow.. They ask".
+  const described = understanding.description.replace(/[.\s]+$/, "");
+  const base = `[Photo] The customer sent a photo showing: ${described}.`;
   return asked
     ? `${base} They ask: "${asked}"`
     : `${base} They likely want: ${understanding.intent_hint}.`;
