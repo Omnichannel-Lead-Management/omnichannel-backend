@@ -1,4 +1,4 @@
-import { ai, GEMINI_MODEL } from "./genaiClient";
+import { generateContentWithFallback } from "./genaiClient";
 import { getRegisteredAgents, getAgent } from "./agents/registry";
 import { isCircuitOpen, recordAgentFailure, recordAgentSuccess } from "./circuitBreaker";
 import type {
@@ -11,7 +11,10 @@ import type {
   LanguageCode
 } from "./types";
 
-const DOWNSTREAM_TIMEOUT_MS = 15_000;
+// Vertex on-demand latency was measured at 7–26s on 2026-08-04, and a downstream
+// agent may make its own Gemini call on top of the router's. At 15s this timeout
+// fired on healthy-but-slow calls and the customer got nothing.
+const DOWNSTREAM_TIMEOUT_MS = Number(process.env.DOWNSTREAM_TIMEOUT_MS ?? 45_000);
 
 type LogLevel = "info" | "warn" | "error";
 
@@ -159,8 +162,7 @@ async function classifyIntent(req: ChatRequest): Promise<RoutingDecision> {
 
   const userContent = `${historySection}\nLatest user message: ${req.message}`;
 
-  const response = await ai.models.generateContent({
-    model: GEMINI_MODEL,
+  const response = await generateContentWithFallback({
     contents: [{ role: "user", parts: [{ text: userContent }] }],
     config: {
       systemInstruction: systemPrompt,
