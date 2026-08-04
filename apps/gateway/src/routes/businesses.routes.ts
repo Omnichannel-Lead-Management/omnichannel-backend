@@ -6,10 +6,16 @@ import {
   getBusinessById,
   getEvolutionConnectionStatus,
   listConversations,
-  refetchEvolutionQrCode
+  refetchEvolutionQrCode,
+  updateBusiness
 } from "../services/BusinessRegistry";
+import { BusinessHoursError, parseStoredBusinessHours } from "../services/BusinessHours";
+import { buildBusinessAnalytics, resolveRange } from "../services/AnalyticsService";
 
-/** Strip secrets before returning a business row over the API. */
+/**
+ * Strip secrets before returning a business row over the API. telegram_bot_token,
+ * telegram_webhook_secret and whatsapp_instance_token must never appear here.
+ */
 function toPublicBusiness(business: Awaited<ReturnType<typeof getBusinessById>>) {
   if (!business) return null;
 
@@ -19,6 +25,11 @@ function toPublicBusiness(business: Awaited<ReturnType<typeof getBusinessById>>)
     sector: business.sector,
     owner_email: business.owner_email,
     chatbot_enabled: Boolean(business.chatbot_enabled),
+    timezone: business.timezone,
+    contact_phone: business.contact_phone,
+    address: business.address,
+    description: business.description,
+    business_hours: parseStoredBusinessHours(business.business_hours),
     telegram_connected: Boolean(business.telegram_bot_token),
     telegram_bot_username: business.telegram_bot_username,
     whatsapp_connected: Boolean(business.whatsapp_instance_name),
@@ -62,6 +73,43 @@ export const businessesRoutes = new Elysia({ prefix: "/api/businesses" })
       return { success: true, business: toPublicBusiness(business) };
     },
     { detail: { summary: "Get a business by id", tags: ["Businesses"] } }
+  )
+
+  .patch(
+    "/:id",
+    async ({ params, body, set }) => {
+      try {
+        const business = await updateBusiness(params.id, body);
+        if (!business) {
+          set.status = 404;
+          return { success: false, error: "Business not found" };
+        }
+        return { success: true, business: toPublicBusiness(business) };
+      } catch (error) {
+        set.status = error instanceof BusinessHoursError ? 422 : 400;
+        return {
+          success: false,
+          error: error instanceof Error ? error.message : "Failed to update business"
+        };
+      }
+    },
+    {
+      body: t.Object({
+        name: t.Optional(t.String({ minLength: 1, maxLength: 160 })),
+        sector: t.Optional(t.String({ minLength: 1, maxLength: 80 })),
+        owner_email: t.Optional(t.Nullable(t.String({ maxLength: 320 }))),
+        timezone: t.Optional(t.Nullable(t.String({ maxLength: 64 }))),
+        contact_phone: t.Optional(t.Nullable(t.String({ maxLength: 40 }))),
+        address: t.Optional(t.Nullable(t.String({ maxLength: 500 }))),
+        description: t.Optional(t.Nullable(t.String({ maxLength: 2000 }))),
+        business_hours: t.Optional(t.Nullable(t.Any())),
+        chatbot_enabled: t.Optional(t.Boolean())
+      }),
+      detail: {
+        summary: "Update a business's owner-editable profile",
+        tags: ["Businesses"]
+      }
+    }
   )
 
   .post(
@@ -129,6 +177,37 @@ export const businessesRoutes = new Elysia({ prefix: "/api/businesses" })
       return { success: true, ...result };
     },
     { detail: { summary: "Poll WhatsApp connection status for this business", tags: ["Businesses"] } }
+  )
+
+  .get(
+    "/:id/analytics",
+    async ({ params, query, set }) => {
+      const business = await getBusinessById(params.id);
+      if (!business) {
+        set.status = 404;
+        return { success: false, error: "Business not found" };
+      }
+
+      try {
+        const range = resolveRange(query);
+        return { success: true, analytics: await buildBusinessAnalytics(params.id, range) };
+      } catch (error) {
+        console.error("Failed to build analytics", error);
+        set.status = 500;
+        return { success: false, error: "Failed to build analytics" };
+      }
+    },
+    {
+      query: t.Object({
+        from: t.Optional(t.String()),
+        to: t.Optional(t.String()),
+        timezone: t.Optional(t.String())
+      }),
+      detail: {
+        summary: "Tenant analytics across conversations, leads and appointments",
+        tags: ["Businesses"]
+      }
+    }
   )
 
   .get(

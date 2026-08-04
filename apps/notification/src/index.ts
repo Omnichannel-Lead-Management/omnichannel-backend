@@ -1,14 +1,12 @@
-import { Elysia } from "elysia";
+import { createApp } from "./app";
+import { createDatabase, initializeDatabase } from "./db";
 
 const PORT = Number(process.env.PORT ?? 3004);
 
-const app = new Elysia()
-  .get("/health", () => ({ status: "ok", service: "notification" }))
-  .post("/api/notifications/email", ({ body }) => ({
-    success: true,
-    message: "Notification service — not yet implemented.",
-    received: body,
-  }))
-  .listen(PORT);
+const db = createDatabase();
+initializeDatabase(db);
+
+const app = createApp(db);
+app.listen(PORT);
 
 console.log(`Notification Service listening on http://localhost:${PORT}`);

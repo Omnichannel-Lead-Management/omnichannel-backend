@@ -12,7 +12,19 @@ export const businesses = pgTable("businesses", {
   name: text("name").notNull(),
   sector: text("sector").notNull(), // salon | tutor | photography | clinic | ...
   owner_email: text("owner_email"),
+  // Mirror of chatbot-builder's business_config.chatbot_enabled, which is the
+  // source of truth. Kept here only so a business row can be rendered without a
+  // second service call; PATCH writes through to chatbot-builder.
   chatbot_enabled: integer("chatbot_enabled").default(1),
+
+  // Owner-editable profile (Settings → Business profile).
+  timezone: text("timezone"),
+  contact_phone: text("contact_phone"),
+  address: text("address"),
+  description: text("description"), // fed to the chatbot as business context
+  // Per-day opening hours as JSON: { "monday": { enabled, open, close }, ... }.
+  // The Appointment service reads this to gate availability per tenant.
+  business_hours: text("business_hours"),
 
   telegram_bot_token: text("telegram_bot_token"),
   telegram_bot_username: text("telegram_bot_username"),

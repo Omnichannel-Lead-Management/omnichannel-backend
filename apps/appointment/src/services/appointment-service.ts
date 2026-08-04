@@ -8,6 +8,7 @@ import {
   closeHourLocal,
   localDateTimeToUtc,
   openHourLocal,
+  type DayWindow,
 } from "./business-hours";
 
 const INSERT_APPOINTMENT_SQL = `
@@ -97,6 +98,7 @@ const ACTIVE_APPOINTMENTS_FOR_DATE_SQL = `
 
 const SLOT_DURATION_MS = 30 * 60 * 1000;
 const HOUR_MS = 60 * 60 * 1000;
+const MINUTE_MS = 60 * 1000;
 
 const ALLOWED_STATUS_TRANSITIONS: Record<
   AppointmentStatus,
@@ -237,17 +239,24 @@ export function createAppointmentIfAvailable(
 export function getAvailableAppointmentSlots(
   db: Database,
   businessId: string,
-  date: string
+  date: string,
+  window: DayWindow | null = {
+    openMinutes: openHourLocal() * 60,
+    closeMinutes: closeHourLocal() * 60,
+  }
 ): AppointmentAvailabilitySlot[] {
   // `date` is a business-local calendar date. Deriving the window from the same
   // opening-hours config the booking path validates against keeps the two in
   // step — otherwise a customer could be offered a slot that booking rejects.
+  // A null window means the business is closed that day: no slots at all.
+  if (!window) return [];
+
   const requestedDateStart = localDateTimeToUtc(date, "00:00");
   if (!requestedDateStart) return [];
 
   const followingDateStart = new Date(requestedDateStart.getTime() + 24 * HOUR_MS);
-  const openingTime = new Date(requestedDateStart.getTime() + openHourLocal() * HOUR_MS);
-  const closingTime = new Date(requestedDateStart.getTime() + closeHourLocal() * HOUR_MS);
+  const openingTime = new Date(requestedDateStart.getTime() + window.openMinutes * MINUTE_MS);
+  const closingTime = new Date(requestedDateStart.getTime() + window.closeMinutes * MINUTE_MS);
 
   const activeAppointments = db
     .query<ActiveAppointmentTimeRow, [string, string, string]>(

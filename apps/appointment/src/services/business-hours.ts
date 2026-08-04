@@ -76,8 +76,92 @@ export function formatLocalTime(instant: Date): string {
   return `${hour12}:${minute} ${suffix}`;
 }
 
-/** True when the whole appointment falls inside business-local opening hours. */
-export function isWithinOpeningHours(startUtc: Date, endUtc: Date): boolean {
+// ---- per-business opening hours -----------------------------------------
+/**
+ * Per-business hours are stored on the gateway and fetched by
+ * business-hours-provider.ts. Everything below takes an optional resolved
+ * window; passing nothing keeps the original global-env behaviour, so a tenant
+ * that has never configured hours is unaffected.
+ */
+
+export const BUSINESS_DAYS = [
+  "sunday",
+  "monday",
+  "tuesday",
+  "wednesday",
+  "thursday",
+  "friday",
+  "saturday"
+] as const;
+
+export type BusinessDay = (typeof BUSINESS_DAYS)[number];
+
+export interface DayHours {
+  enabled: boolean;
+  open?: string;
+  close?: string;
+}
+
+export type BusinessHours = Record<BusinessDay, DayHours>;
+
+/** Opening window for one calendar day, in business-local minutes from midnight. */
+export interface DayWindow {
+  openMinutes: number;
+  closeMinutes: number;
+}
+
+function parseTimeToMinutes(time: string): number | null {
+  const match = /^([01]\d|2[0-3]):([0-5]\d)$/.exec(time);
+  if (!match) return null;
+  return Number(match[1]) * 60 + Number(match[2]);
+}
+
+function envWindow(): DayWindow {
+  return { openMinutes: openHourLocal() * 60, closeMinutes: closeHourLocal() * 60 };
+}
+
+/** Business-local "YYYY-MM-DD" -> the day name used by the hours record. */
+export function localDateToDay(date: string): BusinessDay | null {
+  const parsed = Date.parse(`${date}T00:00:00.000Z`);
+  if (Number.isNaN(parsed)) return null;
+  return BUSINESS_DAYS[new Date(parsed).getUTCDay()];
+}
+
+/**
+ * Resolve the opening window for a business-local date.
+ * - no configured hours -> the global env window (unchanged behaviour)
+ * - configured but closed that day -> null (nothing bookable)
+ */
+export function resolveDayWindow(
+  hours: BusinessHours | null | undefined,
+  localDate: string
+): DayWindow | null {
+  if (!hours) return envWindow();
+
+  const day = localDateToDay(localDate);
+  if (!day) return null;
+
+  const entry = hours[day];
+  if (!entry?.enabled || !entry.open || !entry.close) return null;
+
+  const openMinutes = parseTimeToMinutes(entry.open);
+  const closeMinutes = parseTimeToMinutes(entry.close);
+  if (openMinutes === null || closeMinutes === null || closeMinutes <= openMinutes) return null;
+
+  return { openMinutes, closeMinutes };
+}
+
+/**
+ * True when the whole appointment falls inside business-local opening hours.
+ * `window` defaults to the global env window when omitted.
+ */
+export function isWithinOpeningHours(
+  startUtc: Date,
+  endUtc: Date,
+  window: DayWindow | null = envWindow()
+): boolean {
+  if (!window) return false;
+
   const offset = businessUtcOffsetMinutes() * MINUTE_MS;
   const startLocal = new Date(startUtc.getTime() + offset);
   const endLocal = new Date(endUtc.getTime() + offset);
@@ -90,14 +174,21 @@ export function isWithinOpeningHours(startUtc: Date, endUtc: Date): boolean {
   const startMinutes = startLocal.getUTCHours() * 60 + startLocal.getUTCMinutes();
   const endMinutes = endLocal.getUTCHours() * 60 + endLocal.getUTCMinutes();
 
-  return startMinutes >= openHourLocal() * 60 && endMinutes <= closeHourLocal() * 60;
+  return startMinutes >= window.openMinutes && endMinutes <= window.closeMinutes;
 }
 
-export function openingHoursLabel(): string {
-  const label = (hour: number) => {
-    const suffix = hour >= 12 ? "PM" : "AM";
-    const hour12 = hour % 12 === 0 ? 12 : hour % 12;
-    return `${hour12} ${suffix}`;
+export function openingHoursLabel(window: DayWindow | null = envWindow()): string {
+  if (!window) return "closed today";
+
+  const label = (minutes: number) => {
+    const hour24 = Math.floor(minutes / 60);
+    const minute = minutes % 60;
+    const suffix = hour24 >= 12 ? "PM" : "AM";
+    const hour12 = hour24 % 12 === 0 ? 12 : hour24 % 12;
+    return minute === 0
+      ? `${hour12} ${suffix}`
+      : `${hour12}:${String(minute).padStart(2, "0")} ${suffix}`;
   };
-  return `${label(openHourLocal())} – ${label(closeHourLocal())}`;
+
+  return `${label(window.openMinutes)} – ${label(window.closeMinutes)}`;
 }

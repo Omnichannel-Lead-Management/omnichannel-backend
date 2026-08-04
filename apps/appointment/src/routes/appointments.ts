@@ -7,6 +7,13 @@ import {
   listAppointmentsByBusiness,
   updateAppointmentStatus,
 } from "../services/appointment-service";
+import {
+  isWithinOpeningHours,
+  openingHoursLabel,
+  resolveDayWindow,
+  utcToLocalDate,
+} from "../services/business-hours";
+import { getBusinessHours } from "../services/business-hours-provider";
 import { validateAvailabilityQuery } from "../validation/availability-query";
 import { validateCreateAppointmentInput } from "../validation/create-appointment";
 import { validateUpdateAppointmentStatus } from "../validation/update-appointment-status";
@@ -16,7 +23,7 @@ const UUID_PATTERN =
 
 export function createAppointmentRoutes(db: Database): Elysia {
   return new Elysia({ prefix: "/api/appointments" })
-    .post("/", ({ body, set }) => {
+    .post("/", async ({ body, set }) => {
       const validation = validateCreateAppointmentInput(body);
 
       if (!validation.success) {
@@ -29,6 +36,27 @@ export function createAppointmentRoutes(db: Database): Elysia {
       }
 
       try {
+        // Only enforce opening hours for businesses that have actually saved
+        // them. With no saved hours this path behaves exactly as before, rather
+        // than retroactively rejecting bookings against a global default the
+        // tenant never chose.
+        const hours = await getBusinessHours(validation.data.businessId);
+        if (hours) {
+          const startUtc = new Date(validation.data.startTime);
+          const endUtc = new Date(validation.data.endTime);
+          const window = resolveDayWindow(hours, utcToLocalDate(startUtc));
+
+          if (!isWithinOpeningHours(startUtc, endUtc, window)) {
+            set.status = 422;
+            return {
+              success: false,
+              message: window
+                ? `The business is only open ${openingHoursLabel(window)} on that day.`
+                : "The business is closed on that day.",
+            };
+          }
+        }
+
         const result = createAppointmentIfAvailable(db, validation.data);
 
         if (result.result === "conflict") {
@@ -79,7 +107,7 @@ export function createAppointmentRoutes(db: Database): Elysia {
         };
       }
     })
-    .get("/availability", ({ query, set }) => {
+    .get("/availability", async ({ query, set }) => {
       const validation = validateAvailabilityQuery(query);
 
       if (!validation.success) {
@@ -94,12 +122,19 @@ export function createAppointmentRoutes(db: Database): Elysia {
       try {
         const { businessId, date } = validation.data;
 
+        // Per-business hours when the owner has saved any, else the global
+        // env window. A closed day resolves to null and yields no slots.
+        const hours = await getBusinessHours(businessId);
+        const window = resolveDayWindow(hours, date);
+
         return {
           success: true,
           data: {
             businessId,
             date,
-            slots: getAvailableAppointmentSlots(db, businessId, date),
+            slots: getAvailableAppointmentSlots(db, businessId, date, window),
+            openingHours: openingHoursLabel(window),
+            closed: window === null,
           },
         };
       } catch (error) {

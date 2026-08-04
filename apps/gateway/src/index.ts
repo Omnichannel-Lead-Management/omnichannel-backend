@@ -21,6 +21,8 @@ import { agentWebsocketRoutes } from "./routes/agent.websocket.routes";
 import { agentsRoutes } from "./routes/agents.routes";
 import { leadsRoutes } from "./routes/leads.routes";
 import { appointmentsProxyRoutes } from "./routes/appointments.proxy.routes";
+import { chatbotProxyRoutes } from "./routes/chatbot.proxy.routes";
+import { notificationsProxyRoutes } from "./routes/notifications.proxy.routes";
 import { healthRoutes } from "./routes/health.routes";
 import {
   describeAllowedCorsOrigins,
@@ -108,6 +110,10 @@ const app = new Elysia()
   .use(agentsRoutes)
   .use(leadsRoutes)
   .use(appointmentsProxyRoutes)
+  // Before businessesRoutes: both own paths under /api/businesses/:id, and the
+  // more specific proxy routes must be matched first.
+  .use(chatbotProxyRoutes)
+  .use(notificationsProxyRoutes)
   .use(businessesRoutes)
   .use(healthRoutes)
   .use(telegramRoutes)

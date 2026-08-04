@@ -11,8 +11,11 @@ import {
   isWithinOpeningHours,
   localDateTimeToUtc,
   openingHoursLabel,
-  utcToLocalDate
+  resolveDayWindow,
+  utcToLocalDate,
+  type BusinessHours
 } from "../services/business-hours";
+import { getBusinessHours } from "../services/business-hours-provider";
 
 /**
  * Conversational booking endpoint called by the routing service.
@@ -50,8 +53,18 @@ function pick(language: LanguageTag, english: string, sinhala: string, tamil: st
   return english;
 }
 
-function askForDateTime(language: LanguageTag, missing: "date" | "time" | "both"): string {
-  const hours = openingHoursLabel();
+/**
+ * `knownDate` lets the prompt quote that day's hours when the customer has
+ * already named a date; otherwise it quotes today's.
+ */
+function askForDateTime(
+  language: LanguageTag,
+  missing: "date" | "time" | "both",
+  businessHours: BusinessHours | null = null,
+  knownDate?: string
+): string {
+  const date = knownDate ?? utcToLocalDate(new Date());
+  const hours = openingHoursLabel(resolveDayWindow(businessHours, date));
 
   if (missing === "time") {
     return pick(
@@ -137,15 +150,23 @@ export function createChatRoute(db: Database): Elysia {
         );
       }
 
+      // This tenant's saved hours, if any; null falls back to the global env
+      // window so an unconfigured business behaves exactly as before.
+      const businessHours = await getBusinessHours(businessId);
+
       if (!details.date || !details.time) {
         const missing = !details.date && !details.time ? "both" : !details.date ? "date" : "time";
-        return reply([{ type: "text", text: askForDateTime(language, missing) }]);
+        return reply([
+          { type: "text", text: askForDateTime(language, missing, businessHours, details.date) }
+        ]);
       }
 
       const startUtc = localDateTimeToUtc(details.date, details.time);
       if (!startUtc) {
-        return reply([{ type: "text", text: askForDateTime(language, "both") }]);
+        return reply([{ type: "text", text: askForDateTime(language, "both", businessHours) }]);
       }
+
+      const dayWindow = resolveDayWindow(businessHours, details.date);
 
       const endUtc = new Date(startUtc.getTime() + defaultAppointmentMinutes() * 60 * 1000);
 
@@ -163,15 +184,30 @@ export function createChatRoute(db: Database): Elysia {
         ]);
       }
 
-      if (!isWithinOpeningHours(startUtc, endUtc)) {
+      if (!dayWindow) {
         return reply([
           {
             type: "text",
             text: pick(
               language,
-              `We're only open ${openingHoursLabel()}. Could you pick a time inside those hours?`,
-              `අපි විවෘත වන්නේ ${openingHoursLabel()} පමණි. එම වේලාවන් තුළ වේලාවක් තෝරන්න.`,
-              `நாங்கள் ${openingHoursLabel()} மட்டுமே திறந்திருக்கிறோம். அந்த நேரத்திற்குள் ஒரு நேரத்தைத் தேர்வுசெய்யவும்.`
+              "We're closed that day — could you pick another date?",
+              "එදින අපි වසා ඇත — කරුණාකර වෙනත් දිනයක් තෝරන්න.",
+              "அன்று நாங்கள் மூடியிருக்கிறோம் — வேறு தேதியைத் தேர்வுசெய்யவும்."
+            )
+          }
+        ]);
+      }
+
+      if (!isWithinOpeningHours(startUtc, endUtc, dayWindow)) {
+        const hours = openingHoursLabel(dayWindow);
+        return reply([
+          {
+            type: "text",
+            text: pick(
+              language,
+              `We're only open ${hours}. Could you pick a time inside those hours?`,
+              `අපි විවෘත වන්නේ ${hours} පමණි. එම වේලාවන් තුළ වේලාවක් තෝරන්න.`,
+              `நாங்கள் ${hours} மட்டுமே திறந்திருக்கிறோம். அந்த நேரத்திற்குள் ஒரு நேரத்தைத் தேர்வுசெய்யவும்.`
             )
           }
         ]);
@@ -192,7 +228,7 @@ export function createChatRoute(db: Database): Elysia {
       });
 
       if (outcome.result === "conflict") {
-        const slots = getAvailableAppointmentSlots(db, businessId, utcToLocalDate(startUtc))
+        const slots = getAvailableAppointmentSlots(db, businessId, utcToLocalDate(startUtc), dayWindow)
           .slice(0, MAX_SLOT_SUGGESTIONS)
           .map((slot) => {
             const label = formatLocalTime(new Date(slot.startTime));

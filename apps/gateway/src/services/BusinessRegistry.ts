@@ -3,8 +3,13 @@ import { db, schema } from "../db";
 import { TelegramAdapter } from "../platforms/TelegramAdapter";
 import { EvolutionAdapter } from "../platforms/EvolutionAdapter";
 import type { PlatformAdapter } from "../platforms/PlatformAdapter";
+import { parseBusinessHoursInput, serializeBusinessHours } from "./BusinessHours";
 
 const PUBLIC_BASE_URL = (process.env.PUBLIC_BASE_URL || "http://localhost:3000").replace(/\/$/, "");
+const CHATBOT_SERVICE_URL = (process.env.CHATBOT_SERVICE_URL || "http://localhost:3003").replace(
+  /\/$/,
+  ""
+);
 const EVOLUTION_API_URL = (process.env.EVOLUTION_API_URL || "http://localhost:8080").replace(/\/$/, "");
 const EVOLUTION_API_KEY = process.env.EVOLUTION_API_KEY || "";
 
@@ -43,6 +48,138 @@ export async function getBusinessById(id: string): Promise<BusinessRow | undefin
     .from(schema.businesses)
     .where(eq(schema.businesses.id, id))
     .then((rows) => rows[0]);
+}
+
+export interface BusinessProfilePatch {
+  name?: string;
+  sector?: string;
+  owner_email?: string | null;
+  timezone?: string | null;
+  contact_phone?: string | null;
+  address?: string | null;
+  description?: string | null;
+  business_hours?: unknown;
+  chatbot_enabled?: boolean;
+}
+
+/** "" clears an optional text field; undefined leaves it untouched. */
+function optionalText(value: string | null | undefined): string | null | undefined {
+  if (value === undefined) return undefined;
+  if (value === null) return null;
+  const trimmed = value.trim();
+  return trimmed === "" ? null : trimmed;
+}
+
+/**
+ * Update the owner-editable profile. Throws BusinessHoursError for invalid
+ * hours so the route can return a 400 with the offending day.
+ */
+export async function updateBusiness(
+  id: string,
+  patch: BusinessProfilePatch
+): Promise<BusinessRow | undefined> {
+  const existing = await getBusinessById(id);
+  if (!existing) return undefined;
+
+  const changes: Partial<typeof schema.businesses.$inferInsert> = {};
+
+  if (patch.name !== undefined) {
+    const name = patch.name.trim();
+    if (!name) throw new Error("Business name cannot be empty");
+    changes.name = name;
+  }
+  if (patch.sector !== undefined) {
+    const sector = patch.sector.trim();
+    if (!sector) throw new Error("Sector cannot be empty");
+    changes.sector = sector;
+  }
+
+  const owner_email = optionalText(patch.owner_email);
+  if (owner_email !== undefined) changes.owner_email = owner_email;
+
+  const timezone = optionalText(patch.timezone);
+  if (timezone !== undefined) changes.timezone = timezone;
+
+  const contact_phone = optionalText(patch.contact_phone);
+  if (contact_phone !== undefined) changes.contact_phone = contact_phone;
+
+  const address = optionalText(patch.address);
+  if (address !== undefined) changes.address = address;
+
+  const description = optionalText(patch.description);
+  if (description !== undefined) changes.description = description;
+
+  if (patch.business_hours !== undefined) {
+    changes.business_hours =
+      patch.business_hours === null
+        ? null
+        : serializeBusinessHours(parseBusinessHoursInput(patch.business_hours));
+  }
+
+  // chatbot-builder owns this flag; keep our display copy in step and write
+  // through so the bot's actual behaviour matches what the dashboard shows.
+  if (patch.chatbot_enabled !== undefined) {
+    changes.chatbot_enabled = patch.chatbot_enabled ? 1 : 0;
+    await syncChatbotEnabled(id, patch.chatbot_enabled);
+  }
+
+  if (Object.keys(changes).length === 0) return existing;
+
+  changes.updated_at = new Date().toISOString();
+
+  await db.update(schema.businesses).set(changes).where(eq(schema.businesses.id, id));
+
+  return await getBusinessById(id);
+}
+
+/**
+ * Refresh our display copy of chatbot_enabled after chatbot-builder (the source
+ * of truth) accepted a change directly. Called by the chatbot config proxy so
+ * the mirror never drifts. Best-effort: never throws.
+ */
+export async function mirrorChatbotEnabled(business_id: string, enabled: boolean): Promise<void> {
+  try {
+    await db
+      .update(schema.businesses)
+      .set({ chatbot_enabled: enabled ? 1 : 0, updated_at: new Date().toISOString() })
+      .where(eq(schema.businesses.id, business_id));
+  } catch (err) {
+    console.warn(
+      `[businesses] could not mirror chatbot_enabled for ${business_id}:`,
+      err instanceof Error ? err.message : String(err)
+    );
+  }
+}
+
+/**
+ * Best-effort mirror of the enabled flag into chatbot-builder, which is the
+ * source of truth for it. A failure here must not fail the profile save — the
+ * route surfaces the warning instead.
+ */
+export async function syncChatbotEnabled(
+  business_id: string,
+  enabled: boolean
+): Promise<{ ok: boolean; error?: string }> {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), 5000);
+
+  try {
+    const res = await fetch(
+      `${CHATBOT_SERVICE_URL}/api/businesses/${encodeURIComponent(business_id)}/config`,
+      {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ chatbot_enabled: enabled }),
+        signal: controller.signal
+      }
+    );
+    if (!res.ok) return { ok: false, error: `chatbot service responded ${res.status}` };
+    return { ok: true };
+  } catch (err) {
+    return { ok: false, error: err instanceof Error ? err.message : String(err) };
+  } finally {
+    clearTimeout(timer);
+  }
 }
 
 /**

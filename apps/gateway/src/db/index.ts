@@ -45,6 +45,11 @@ export async function initDatabase() {
       sector TEXT NOT NULL,
       owner_email TEXT,
       chatbot_enabled INTEGER DEFAULT 1,
+      timezone TEXT,
+      contact_phone TEXT,
+      address TEXT,
+      description TEXT,
+      business_hours TEXT,
       telegram_bot_token TEXT,
       telegram_bot_username TEXT,
       telegram_webhook_secret TEXT,
@@ -107,6 +112,13 @@ export async function initDatabase() {
       updated_at TEXT
     )
   `);
+
+  // Add the owner-editable profile columns to pre-existing DBs
+  await db.execute(sql`ALTER TABLE businesses ADD COLUMN IF NOT EXISTS timezone TEXT`);
+  await db.execute(sql`ALTER TABLE businesses ADD COLUMN IF NOT EXISTS contact_phone TEXT`);
+  await db.execute(sql`ALTER TABLE businesses ADD COLUMN IF NOT EXISTS address TEXT`);
+  await db.execute(sql`ALTER TABLE businesses ADD COLUMN IF NOT EXISTS description TEXT`);
+  await db.execute(sql`ALTER TABLE businesses ADD COLUMN IF NOT EXISTS business_hours TEXT`);
 
   // Add escalation columns to existing DBs safely (Postgres supports IF NOT EXISTS directly)
   await db.execute(sql`ALTER TABLE messengers ADD COLUMN IF NOT EXISTS is_escalated INTEGER DEFAULT 0`);
