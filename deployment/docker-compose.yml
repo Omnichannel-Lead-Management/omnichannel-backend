@@ -69,6 +69,9 @@ services:
       GEMINI_API_KEY: ${GEMINI_API_KEY:-}
       GEMINI_MODEL: ${GEMINI_MODEL:-gemini-2.5-flash}
       LLM_ROUTING_ENABLED: ${LLM_ROUTING_ENABLED:-true}
+      # Reads the tenant's name/sector/description to give the FAQ matcher
+      # business context. Best-effort: unreachable means no extra context.
+      GATEWAY_URL: http://gateway:3000
     volumes:
       - chatbot_data:/data
     healthcheck:
@@ -116,9 +119,9 @@ services:
       retries: 3
       start_period: 20s
 
-  # Stub service: answers 200 with "not yet implemented" and sends nothing.
-  # Deployed so Lead Manager's best-effort notify hook has a real peer instead
-  # of logging a connection-refused warning on every lead.
+  # Stores the lead events Lead Manager posts here and serves them back as the
+  # dashboard's in-app notification centre. Email delivery is still a stub — the
+  # POST /api/notifications/email response reports email_sent: false.
   notification:
     build: ../apps/notification
     restart: unless-stopped
@@ -127,6 +130,9 @@ services:
     environment:
       PORT: 3004
       NODE_ENV: production
+      DATABASE_PATH: /data/notification.db
+    volumes:
+      - notification_data:/data
     healthcheck:
       test:
         [
@@ -158,8 +164,11 @@ services:
       GEMINI_MODEL: ${GEMINI_MODEL:-gemini-2.5-flash}
       # Customers say "3pm" meaning their local time; stored rows stay UTC.
       BUSINESS_UTC_OFFSET_MINUTES: ${BUSINESS_UTC_OFFSET_MINUTES:-0}
+      # Fallback opening hours, used only for tenants that have not saved their
+      # own. Per-business hours live on the gateway and are read from there.
       BUSINESS_OPEN_HOUR: ${BUSINESS_OPEN_HOUR:-9}
       BUSINESS_CLOSE_HOUR: ${BUSINESS_CLOSE_HOUR:-17}
+      GATEWAY_URL: http://gateway:3000
     volumes:
       - appointment_data:/data
     healthcheck:
@@ -191,6 +200,11 @@ services:
       # are proxied through it rather than published as separate origins.
       LEAD_MANAGER_URL: http://lead-manager:3002
       APPOINTMENT_SERVICE_URL: http://appointment:3005
+      # FAQs, chatbot config, sector templates and flows — the dashboard's
+      # Settings screens reach chatbot-builder only through this proxy.
+      CHATBOT_SERVICE_URL: http://chatbot:3003
+      # In-app notification centre (the bell in the dashboard header).
+      NOTIFICATION_SERVICE_URL: http://notification:3004
       # Gemini reads inbound voice notes and photos here, at the edge, and turns
       # them into text — so no object storage or speech-to-text service is needed
       # and every downstream service keeps receiving plain text.
@@ -268,3 +282,4 @@ volumes:
   chatbot_data:
   appointment_data:
   lead_data:
+  notification_data:
