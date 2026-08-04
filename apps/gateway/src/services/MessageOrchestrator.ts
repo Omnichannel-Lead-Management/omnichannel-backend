@@ -248,6 +248,10 @@ function buildLanguageSelectionInteractive(
 }
 
 export class MessageOrchestrator {
+  /** Sent when the routing agent cannot produce a reply, so the customer is never left in silence. */
+  static readonly SERVICE_FALLBACK_MESSAGE =
+    "Sorry, I can't answer that right now because of a temporary technical problem. Please try again in a few minutes — or leave your question here and our team will follow up.";
+
   private externalAIEndpoint: string;
   private adminDeescalateKey: string;
 
@@ -878,6 +882,70 @@ export class MessageOrchestrator {
   }
 
   /**
+   * Tell the customer we could not answer, instead of leaving them in silence.
+   *
+   * Every early exit in forwardToAI used to return without sending anything, so
+   * an AI outage looked identical to a working system from the customer's side.
+   * Reuses an already-resolved adapter when the caller has one.
+   */
+  private async sendServiceFallback(
+    payload: AIRequestPayload,
+    requestId: string,
+    reason: string,
+    knownAdapter?: Awaited<ReturnType<MessageOrchestrator["resolveAdapter"]>>
+  ): Promise<void> {
+    try {
+      const adapter =
+        knownAdapter ?? (await this.resolveAdapter(payload.platform, payload.business_id));
+      if (!adapter) {
+        logWithCorrelation(
+          requestId,
+          "ROUTING_ERROR",
+          `no adapter for fallback platform=${payload.platform} reason=${reason}`,
+          "error"
+        );
+        return;
+      }
+
+      const sendResult = await adapter.sendMessage(
+        payload.messenger_id,
+        MessageOrchestrator.SERVICE_FALLBACK_MESSAGE,
+        { request_id: requestId }
+      );
+      if (!sendResult.success) {
+        logWithCorrelation(
+          requestId,
+          "DOWNSTREAM_ERROR",
+          `platform=${payload.platform} messenger_id=${payload.messenger_id} type=text reason=service_fallback detail="${sendResult.error ?? "unknown error"}"`,
+          "error"
+        );
+        return;
+      }
+
+      await this.saveReply(
+        payload.messenger_id,
+        payload.platform,
+        MessageOrchestrator.SERVICE_FALLBACK_MESSAGE,
+        { type: "service_fallback", fallback_reason: reason, request_id: requestId },
+        payload.business_id
+      );
+      logWithCorrelation(
+        requestId,
+        "OUTBOUND_RESPONSE",
+        `platform=${payload.platform} messenger_id=${payload.messenger_id} type=text reason=service_fallback detail=${reason}`
+      );
+    } catch (error) {
+      // A failing fallback must never mask the original routing failure.
+      logWithCorrelation(
+        requestId,
+        "DOWNSTREAM_ERROR",
+        `service fallback failed: ${error instanceof Error ? error.message : String(error)}`,
+        "error"
+      );
+    }
+  }
+
+  /**
    * Forward message to routing agent, then dispatch each reply message
    * via the appropriate platform adapter.
    * When isVoiceMessage is true and the adapter supports sendAudio, text replies
@@ -885,6 +953,9 @@ export class MessageOrchestrator {
    */
   private async forwardToAI(payload: AIRequestPayload, isVoiceMessage: boolean = false): Promise<void> {
     const requestId = payload.request_id || generateCorrelationId();
+    // Once dispatch begins the customer may already hold a real reply, so a
+    // later throw must not append a "technical problem" message contradicting it.
+    let reachedDispatch = false;
 
     try {
       logWithCorrelation(
@@ -923,6 +994,7 @@ export class MessageOrchestrator {
           `platform=${payload.platform} messenger_id=${payload.messenger_id} decision=routing_agent_unsuccessful detail="${result.error ?? "(empty)"}"`,
           "warn"
         );
+        await this.sendServiceFallback(payload, requestId, "routing_agent_unsuccessful");
         return;
       }
 
@@ -1006,9 +1078,15 @@ export class MessageOrchestrator {
           `platform=${payload.platform} messenger_id=${payload.messenger_id} decision=no_outbound_messages detail="${result.error ?? "(empty)"}"`,
           "warn"
         );
+        // An escalated chat already received its escalation notice above; a
+        // technical-problem message on top of it would only confuse the customer.
+        if (!result.escalated) {
+          await this.sendServiceFallback(payload, requestId, "no_outbound_messages", adapter);
+        }
         return;
       }
 
+      reachedDispatch = true;
       for (const msg of result.messages) {
         if (msg.type === "interactive") {
           // Use native interactive sending if the adapter supports it;
@@ -1190,6 +1268,9 @@ export class MessageOrchestrator {
         `failed to forward to routing agent: ${errorMessage}`,
         "error"
       );
+      if (!reachedDispatch) {
+        await this.sendServiceFallback(payload, requestId, "routing_agent_error");
+      }
       // Don't throw — the incoming message is already saved
     }
   }
