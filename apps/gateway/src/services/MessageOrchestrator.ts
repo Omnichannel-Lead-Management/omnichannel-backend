@@ -11,7 +11,7 @@
  */
 
 import { db, schema } from "../db";
-import { eq, and, desc, gte } from "drizzle-orm";
+import { eq, and, desc, gte, isNull, or } from "drizzle-orm";
 import { getPlatformAdapter } from "../platforms";
 import { getBusinessById, resolveAdapterForBusiness } from "./BusinessRegistry";
 import {
@@ -459,71 +459,17 @@ export class MessageOrchestrator {
         return { success: true };
       }
 
-      // 5. If conversation is escalated, route the message to the agent channel.
-      if (messengerInfo?.is_escalated) {
-        if (!agentHub.hasConnectedAgents(correlatedPayload.business_id)) {
-          await db
-            .update(schema.messengers)
-            .set({
-              is_escalated: 0,
-              escalation_status: "none",
-              claimed_by_agent_id: null,
-              claimed_at: null,
-              released_at: new Date().toISOString(),
-              updated_at: new Date().toISOString()
-            })
-            .where(
-              and(
-                eq(schema.messengers.messenger_id, correlatedPayload.messenger_id),
-                eq(schema.messengers.platform, correlatedPayload.platform),
-                eq(schema.messengers.business_id, correlatedPayload.business_id || "biz_default")
-              )
-            );
+      // 5. A human agent only owns the conversation once they have claimed it.
+      //    An escalation on its own merely queues the chat: the AI keeps
+      //    answering so nobody is left in silence waiting for an agent.
+      const claimingAgentId = messengerInfo?.is_escalated ? messengerInfo.claimed_by_agent_id : null;
 
-          await agentHub.notifyConversationDeEscalated(
-            correlatedPayload.platform,
-            correlatedPayload.messenger_id,
-            correlatedPayload.business_id
-          );
-
-          const adapter = await this.resolveAdapter(correlatedPayload.platform, correlatedPayload.business_id);
-          const autoDeEscalatedMessage =
-            "Our live agents are currently unavailable, so I switched you back to the AI assistant.";
-
-          if (adapter) {
-            await adapter.sendMessage(correlatedPayload.messenger_id, autoDeEscalatedMessage, {
-              request_id: requestId
-            });
-          }
-
-          await this.saveReply(
-            correlatedPayload.messenger_id,
-            correlatedPayload.platform,
-            autoDeEscalatedMessage,
-            {
-              type: "auto_deescalated_no_agents",
-              request_id: requestId
-            },
-            correlatedPayload.business_id
-          );
-
-          messengerInfo = {
-            ...messengerInfo,
-            is_escalated: 0,
-            escalation_status: "none",
-            claimed_by_agent_id: null
-          };
-
+      if (claimingAgentId) {
+        if (agentHub.isAgentConnected(claimingAgentId)) {
           logWithCorrelation(
             requestId,
             "ROUTING_DECISION",
-            `platform=${correlatedPayload.platform} messenger_id=${correlatedPayload.messenger_id} decision=auto_deescalate_no_agents`
-          );
-        } else {
-          logWithCorrelation(
-            requestId,
-            "ROUTING_DECISION",
-            `platform=${correlatedPayload.platform} messenger_id=${correlatedPayload.messenger_id} decision=route_to_human_agent`
+            `platform=${correlatedPayload.platform} messenger_id=${correlatedPayload.messenger_id} decision=route_to_human_agent agent_id=${claimingAgentId}`
           );
           await agentHub.handleEscalatedUserMessage({
             platform: correlatedPayload.platform,
@@ -534,6 +480,79 @@ export class MessageOrchestrator {
 
           return { success: true };
         }
+
+        // The claiming agent dropped off without releasing. Put the chat back
+        // in the queue for another agent and let the AI carry it meanwhile.
+        await db
+          .update(schema.messengers)
+          .set({
+            escalation_status: "queued",
+            claimed_by_agent_id: null,
+            claimed_at: null,
+            released_at: new Date().toISOString(),
+            updated_at: new Date().toISOString()
+          })
+          .where(
+            and(
+              eq(schema.messengers.messenger_id, correlatedPayload.messenger_id),
+              eq(schema.messengers.platform, correlatedPayload.platform),
+              eq(schema.messengers.business_id, correlatedPayload.business_id || "biz_default")
+            )
+          );
+
+        await agentHub.notifyConversationQueued(
+          correlatedPayload.platform,
+          correlatedPayload.messenger_id,
+          correlatedPayload.business_id
+        );
+
+        const adapter = await this.resolveAdapter(correlatedPayload.platform, correlatedPayload.business_id);
+        const handbackMessage =
+          "Our agent has left the chat, so I will keep helping you until another agent is available.";
+
+        if (adapter) {
+          await adapter.sendMessage(correlatedPayload.messenger_id, handbackMessage, {
+            request_id: requestId
+          });
+        }
+
+        await this.saveReply(
+          correlatedPayload.messenger_id,
+          correlatedPayload.platform,
+          handbackMessage,
+          {
+            type: "unclaimed_agent_disconnected",
+            request_id: requestId
+          },
+          correlatedPayload.business_id
+        );
+
+        messengerInfo = {
+          ...messengerInfo,
+          escalation_status: "queued",
+          claimed_by_agent_id: null
+        };
+
+        logWithCorrelation(
+          requestId,
+          "ROUTING_DECISION",
+          `platform=${correlatedPayload.platform} messenger_id=${correlatedPayload.messenger_id} decision=unclaim_agent_disconnected agent_id=${claimingAgentId}`
+        );
+      } else if (messengerInfo?.is_escalated) {
+        // Queued but unclaimed: mirror the message into the agent queue view so
+        // whoever claims it sees live traffic, then let the AI answer it.
+        await agentHub.handleEscalatedUserMessage({
+          platform: correlatedPayload.platform,
+          messenger_id: correlatedPayload.messenger_id,
+          business_id: correlatedPayload.business_id,
+          text: correlatedPayload.message
+        });
+
+        logWithCorrelation(
+          requestId,
+          "ROUTING_DECISION",
+          `platform=${correlatedPayload.platform} messenger_id=${correlatedPayload.messenger_id} decision=queued_unclaimed_ai_continues`
+        );
       }
 
       // 5. Load chat history (within the past month, up to 4000 chars)
@@ -882,6 +901,57 @@ export class MessageOrchestrator {
   }
 
   /**
+   * Put a conversation in the human-agent queue.
+   *
+   * Only the first transition counts: a chat that is already queued (or already
+   * claimed by an agent) keeps its original request time, tag and summary, so a
+   * customer who keeps chatting while waiting does not jump the queue or get the
+   * escalation notice repeated. Returns true when this call actually queued it.
+   */
+  private async queueForHumanAgent(
+    payload: AIRequestPayload,
+    requestId: string,
+    escalation_tag?: string,
+    escalation_summary?: string
+  ): Promise<boolean> {
+    const now = new Date().toISOString();
+
+    try {
+      const queued = await db
+        .update(schema.messengers)
+        .set({
+          is_escalated: 1,
+          escalation_status: "queued",
+          claimed_by_agent_id: null,
+          claimed_at: null,
+          escalation_requested_at: now,
+          escalation_tag: escalation_tag ?? null,
+          escalation_summary: escalation_summary ?? null,
+          updated_at: now
+        })
+        .where(
+          and(
+            eq(schema.messengers.messenger_id, payload.messenger_id),
+            eq(schema.messengers.platform, payload.platform),
+            eq(schema.messengers.business_id, payload.business_id || "biz_default"),
+            or(eq(schema.messengers.is_escalated, 0), isNull(schema.messengers.is_escalated))
+          )
+        )
+        .returning({ id: schema.messengers.id });
+
+      return queued.length > 0;
+    } catch (error) {
+      logWithCorrelation(
+        requestId,
+        "ROUTING_ERROR",
+        `failed to queue escalation platform=${payload.platform} messenger_id=${payload.messenger_id} detail="${error instanceof Error ? error.message : String(error)}"`,
+        "error"
+      );
+      return false;
+    }
+  }
+
+  /**
    * Tell the customer we could not answer, instead of leaving them in silence.
    *
    * Every early exit in forwardToAI used to return without sending anything, so
@@ -1009,65 +1079,68 @@ export class MessageOrchestrator {
         return;
       }
 
-      // If the downstream agent flagged an escalation, mark this conversation
+      // If the downstream agent flagged an escalation, queue this conversation
+      // for a human. Queueing never mutes the AI — the handover only happens
+      // when an agent claims the chat.
+      let escalationNoticeSent = false;
       if (result.escalated) {
-        await db
-          .update(schema.messengers)
-          .set({
-            is_escalated: 1,
-            escalation_status: "queued",
-            claimed_by_agent_id: null,
-            claimed_at: null,
-            escalation_requested_at: new Date().toISOString(),
-            escalation_tag: result.escalation_tag ?? null,
-            escalation_summary: result.escalation_summary ?? null,
-            updated_at: new Date().toISOString()
-          })
-          .where(
-            and(
-              eq(schema.messengers.messenger_id, payload.messenger_id),
-              eq(schema.messengers.platform, payload.platform),
-              eq(schema.messengers.business_id, payload.business_id || "biz_default")
-            )
-          );
-        logWithCorrelation(
+        const queuedNow = await this.queueForHumanAgent(
+          payload,
           requestId,
-          "ROUTING_DECISION",
-          `platform=${payload.platform} messenger_id=${payload.messenger_id} decision=escalated_to_human_queue`
+          result.escalation_tag,
+          result.escalation_summary
         );
 
-        await agentHub.notifyConversationQueued(payload.platform, payload.messenger_id, payload.business_id);
-
-        if (!agentHub.hasConnectedAgents(payload.business_id)) {
-          const noAgentMessage = "No customer care agents are available right now. Please wait a few hours and try again.";
-          await adapter.sendMessage(payload.messenger_id, noAgentMessage, {
-            request_id: requestId
-          });
-          await this.saveReply(payload.messenger_id, payload.platform, noAgentMessage, {
-            type: "escalation_notice",
-            no_agents_available: true,
-            request_id: requestId
-          }, payload.business_id);
+        if (!queuedNow) {
+          // Already waiting in the queue (or already claimed) — don't renew the
+          // request time or repeat the notice on every follow-up message.
           logWithCorrelation(
             requestId,
-            "OUTBOUND_RESPONSE",
-            `platform=${payload.platform} messenger_id=${payload.messenger_id} type=text reason=no_agents_available`
+            "ROUTING_DECISION",
+            `platform=${payload.platform} messenger_id=${payload.messenger_id} decision=escalation_already_queued`
           );
         } else {
-          const queuedMessage = "Your chat has been escalated to customer care. Please wait while an agent claims this chat.";
-          await adapter.sendMessage(payload.messenger_id, queuedMessage, {
-            request_id: requestId
-          });
-          await this.saveReply(payload.messenger_id, payload.platform, queuedMessage, {
-            type: "escalation_notice",
-            no_agents_available: false,
-            request_id: requestId
-          }, payload.business_id);
           logWithCorrelation(
             requestId,
-            "OUTBOUND_RESPONSE",
-            `platform=${payload.platform} messenger_id=${payload.messenger_id} type=text reason=chat_queued_for_agent`
+            "ROUTING_DECISION",
+            `platform=${payload.platform} messenger_id=${payload.messenger_id} decision=escalated_to_human_queue`
           );
+
+          await agentHub.notifyConversationQueued(payload.platform, payload.messenger_id, payload.business_id);
+
+          escalationNoticeSent = true;
+
+          if (!agentHub.hasConnectedAgents(payload.business_id)) {
+            const noAgentMessage = "No customer care agents are available right now. I have added you to the customer care queue and will keep helping you until an agent joins.";
+            await adapter.sendMessage(payload.messenger_id, noAgentMessage, {
+              request_id: requestId
+            });
+            await this.saveReply(payload.messenger_id, payload.platform, noAgentMessage, {
+              type: "escalation_notice",
+              no_agents_available: true,
+              request_id: requestId
+            }, payload.business_id);
+            logWithCorrelation(
+              requestId,
+              "OUTBOUND_RESPONSE",
+              `platform=${payload.platform} messenger_id=${payload.messenger_id} type=text reason=no_agents_available`
+            );
+          } else {
+            const queuedMessage = "Your chat has been escalated to customer care. An agent will join as soon as one claims this chat — I will keep helping you until then.";
+            await adapter.sendMessage(payload.messenger_id, queuedMessage, {
+              request_id: requestId
+            });
+            await this.saveReply(payload.messenger_id, payload.platform, queuedMessage, {
+              type: "escalation_notice",
+              no_agents_available: false,
+              request_id: requestId
+            }, payload.business_id);
+            logWithCorrelation(
+              requestId,
+              "OUTBOUND_RESPONSE",
+              `platform=${payload.platform} messenger_id=${payload.messenger_id} type=text reason=chat_queued_for_agent`
+            );
+          }
         }
       }
 
@@ -1078,9 +1151,10 @@ export class MessageOrchestrator {
           `platform=${payload.platform} messenger_id=${payload.messenger_id} decision=no_outbound_messages detail="${result.error ?? "(empty)"}"`,
           "warn"
         );
-        // An escalated chat already received its escalation notice above; a
-        // technical-problem message on top of it would only confuse the customer.
-        if (!result.escalated) {
+        // A chat that just received its escalation notice already has an answer;
+        // a technical-problem message on top of it would only confuse the
+        // customer. A chat queued earlier has had no reply yet, so it still needs one.
+        if (!escalationNoticeSent) {
           await this.sendServiceFallback(payload, requestId, "no_outbound_messages", adapter);
         }
         return;

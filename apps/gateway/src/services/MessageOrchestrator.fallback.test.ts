@@ -16,9 +16,20 @@ const noopChain: any = new Proxy(function () {} as any, {
   apply: () => noopChain
 });
 
+// Rows the escalation UPDATE reports back: one row = this message queued the
+// chat, none = it was already waiting in the queue.
+let queuedRows: Array<{ id: number }> = [{ id: 1 }];
+
 mock.module("../db", () => ({
   db: {
-    update: () => ({ set: () => ({ where: async () => undefined }) }),
+    update: () => ({
+      set: () => ({
+        where: () => ({
+          then: (resolve: (value: unknown) => unknown) => resolve(undefined),
+          returning: async () => queuedRows
+        })
+      })
+    }),
     select: () => noopChain,
     insert: () => ({ values: async () => undefined })
   },
@@ -136,6 +147,7 @@ describe("routing failure fallback", () => {
   test("an escalated chat is not told about a technical problem", async () => {
     // The escalation notice is the correct message here; a fallback on top of it
     // would contradict it.
+    queuedRows = [{ id: 1 }];
     const { run, sent, fallbacks } = harness({
       ok: true,
       body: { success: true, escalated: true, messages: [] }
@@ -144,6 +156,22 @@ describe("routing failure fallback", () => {
 
     expect(fallbacks()).toHaveLength(0);
     expect(sent.some((m) => m.text.includes("escalated to customer care"))).toBe(true);
+  });
+
+  test("a chat already waiting in the queue is not re-notified, but is still answered", async () => {
+    // The customer keeps chatting while waiting for an agent: repeating "your
+    // chat has been escalated" on every message would read as a stuck bot, and
+    // silence would be worse.
+    queuedRows = [];
+    const { run, sent, fallbacks } = harness({
+      ok: true,
+      body: { success: true, escalated: true, messages: [] }
+    });
+    await run();
+
+    expect(sent.some((m) => m.text.includes("escalated to customer care"))).toBe(false);
+    expect(fallbacks()).toHaveLength(1);
+    queuedRows = [{ id: 1 }];
   });
 
   test("a real reply is never followed by a fallback", async () => {

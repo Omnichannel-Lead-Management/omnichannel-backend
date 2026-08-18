@@ -141,6 +141,12 @@ export class AgentHub {
     return this.agents.size;
   }
 
+  /** Whether this specific agent still holds a live socket — the test for "is the human who claimed this chat still here?". */
+  isAgentConnected(agent_id: string | null | undefined): boolean {
+    if (!agent_id) return false;
+    return this.agents.has(agent_id);
+  }
+
   /** True if this agent (super agent, or one scoped to business_id) may act on that business's chats. */
   private isAuthorizedForBusiness(agent_id: string, business_id: string): boolean {
     const connection = this.agents.get(agent_id);
@@ -228,6 +234,21 @@ export class AgentHub {
 
     const historyPage = await this.getHistory(normalizedPlatform, messenger_id, 30, undefined, targetBusinessId);
 
+    // The claim is the actual handover: until now the AI was still answering,
+    // so the customer has to be told a human has taken over.
+    const claimedMessage = "A customer care agent has joined this chat and will take it from here.";
+    const adapter = await this.resolveAdapter(normalizedPlatform, targetBusinessId);
+    if (adapter) {
+      await adapter.sendMessage(messenger_id, claimedMessage);
+    }
+
+    await this.saveAssistantMessage(normalizedPlatform, messenger_id, targetBusinessId, claimedMessage, {
+      from_agent: false,
+      system: true,
+      type: "claimed",
+      agent_id
+    });
+
     this.broadcastToBusiness(targetBusinessId, {
       type: "chat_claimed",
       platform: normalizedPlatform,
@@ -264,9 +285,14 @@ export class AgentHub {
       return { success: false, error: "Conversation is not escalated." };
     }
 
-    if (conversation.claimed_by_agent_id !== agent_id) {
+    // A claimed chat belongs to the agent holding it. An unclaimed one is still
+    // being answered by the AI and only sits in the queue, so any agent of this
+    // business may clear it out.
+    if (conversation.claimed_by_agent_id && conversation.claimed_by_agent_id !== agent_id) {
       return { success: false, error: "Only the claiming agent can release this conversation." };
     }
+
+    const wasClaimed = Boolean(conversation.claimed_by_agent_id);
 
     await db
       .update(schema.messengers)
@@ -286,7 +312,11 @@ export class AgentHub {
         )
       );
 
-    const deEscalationMessage = "Your conversation with customer care is complete. You can continue chatting with the AI assistant.";
+    // Nobody ever joined an unclaimed chat, so telling that customer their
+    // conversation with customer care is "complete" would make no sense.
+    const deEscalationMessage = wasClaimed
+      ? "Your conversation with customer care is complete. You can continue chatting with the AI assistant."
+      : "Our customer care team has closed this request. You can keep chatting with the AI assistant here.";
     const adapter = await this.resolveAdapter(normalizedPlatform, targetBusinessId);
     if (adapter) {
       await adapter.sendMessage(messenger_id, deEscalationMessage);
@@ -364,6 +394,7 @@ export class AgentHub {
       from: "agent",
       text: trimmedMessage,
       agent_id,
+      escalation_status: "claimed",
       timestamp
     });
 
@@ -475,6 +506,9 @@ export class AgentHub {
       from: "user",
       text: payload.text,
       timestamp: payload.timestamp || new Date().toISOString(),
+      // A queued chat is still being answered by the AI; only a claimed one
+      // belongs to a human, and the dashboard needs to tell them apart.
+      escalation_status: conversation.claimed_by_agent_id ? "claimed" : "queued",
       claimed_by_agent_id: conversation.claimed_by_agent_id
     });
 
