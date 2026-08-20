@@ -254,6 +254,7 @@ services:
         VITE_BUSINESS_NAME: ${DASHBOARD_BUSINESS_NAME:-}
         VITE_BUSINESS_SECTOR: ${DASHBOARD_BUSINESS_SECTOR:-}
         VITE_BUSINESS_EMAIL: ${DASHBOARD_BUSINESS_EMAIL:-}
+        VITE_AGENT_ESCALATION_QUEUE_ENABLED: ${DASHBOARD_AGENT_ESCALATION_QUEUE_ENABLED:-true}
     restart: unless-stopped
     # Keep direct port for debugging; public traffic should use edge :80
     ports:
