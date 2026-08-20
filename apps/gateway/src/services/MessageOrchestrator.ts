@@ -334,6 +334,15 @@ export class MessageOrchestrator {
         metadata: correlatedPayload.metadata ? JSON.stringify(correlatedPayload.metadata) : null
       });
 
+      // Push it to every open dashboard now, whoever ends up answering it.
+      await agentHub.notifyConversationMessage({
+        platform: correlatedPayload.platform,
+        messenger_id: correlatedPayload.messenger_id,
+        business_id: correlatedPayload.business_id,
+        from: "user",
+        text: correlatedPayload.message
+      });
+
       let messengerInfo = await this.getMessengerInfo(
         correlatedPayload.messenger_id,
         correlatedPayload.platform,
@@ -439,13 +448,8 @@ export class MessageOrchestrator {
             "ROUTING_DECISION",
             `platform=${correlatedPayload.platform} messenger_id=${correlatedPayload.messenger_id} decision=route_to_human_agent agent_id=${claimingAgentId}`
           );
-          await agentHub.handleEscalatedUserMessage({
-            platform: correlatedPayload.platform,
-            messenger_id: correlatedPayload.messenger_id,
-            business_id: correlatedPayload.business_id,
-            text: correlatedPayload.message
-          });
-
+          // Already mirrored to the dashboard above; the claiming agent owns
+          // the reply from here, so the AI stays out of it.
           return { success: true };
         }
 
@@ -505,13 +509,6 @@ export class MessageOrchestrator {
           `platform=${correlatedPayload.platform} messenger_id=${correlatedPayload.messenger_id} decision=unclaim_agent_disconnected agent_id=${claimingAgentId}`
         );
       } else if (messengerInfo?.is_escalated) {
-        await agentHub.handleEscalatedUserMessage({
-          platform: correlatedPayload.platform,
-          messenger_id: correlatedPayload.messenger_id,
-          business_id: correlatedPayload.business_id,
-          text: correlatedPayload.message
-        });
-
         logWithCorrelation(
           requestId,
           "ROUTING_DECISION",
@@ -583,6 +580,16 @@ export class MessageOrchestrator {
       message_text: reply_text,
       is_from_user: false,
       metadata: metadata ? JSON.stringify(metadata) : null
+    });
+
+    // The bot's side of the conversation has to reach the inbox live too,
+    // otherwise an agent watching a chat sees only half of it.
+    await agentHub.notifyConversationMessage({
+      platform,
+      messenger_id,
+      business_id,
+      from: "ai",
+      text: reply_text
     });
 
     console.log(`💾 Reply saved for ${platform}:${messenger_id}`);

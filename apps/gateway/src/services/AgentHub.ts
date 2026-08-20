@@ -472,32 +472,50 @@ export class AgentHub {
     await this.broadcastQueueSnapshot();
   }
 
-  async handleEscalatedUserMessage(payload: {
+  /**
+   * Mirror one message into every open dashboard so the inbox is live.
+   *
+   * This deliberately does not require an escalation: an agent watching a chat
+   * the bot is handling still needs to see it move, otherwise the inbox only
+   * updates when they reopen the conversation or reload the page.
+   */
+  async notifyConversationMessage(payload: {
     platform: string;
     messenger_id: string;
     business_id?: string;
+    from: "user" | "ai" | "agent";
     text: string;
+    agent_id?: string;
     timestamp?: string;
   }): Promise<void> {
+    const normalizedPlatform = payload.platform.toLowerCase();
     const targetBusinessId = payload.business_id || "biz_default";
-    const conversation = await this.getMessenger(payload.platform, payload.messenger_id, targetBusinessId);
-    if (!conversation || !conversation.is_escalated) {
-      return;
-    }
+    const conversation = await this.getMessenger(normalizedPlatform, payload.messenger_id, targetBusinessId);
+    const escalated = Boolean(conversation?.is_escalated);
 
     this.broadcastToBusiness(targetBusinessId, {
       type: "chat_message",
-      platform: payload.platform,
+      platform: normalizedPlatform,
       messenger_id: payload.messenger_id,
       business_id: targetBusinessId,
-      from: "user",
+      from: payload.from,
       text: payload.text,
+      agent_id: payload.agent_id,
       timestamp: payload.timestamp || new Date().toISOString(),
-      escalation_status: conversation.claimed_by_agent_id ? "claimed" : "queued",
-      claimed_by_agent_id: conversation.claimed_by_agent_id
+      display_name: conversation ? this.mapMessengerToSummary(conversation).display_name : undefined,
+      is_escalated: escalated,
+      escalation_status: escalated
+        ? conversation!.claimed_by_agent_id
+          ? "claimed"
+          : "queued"
+        : "none",
+      claimed_by_agent_id: conversation?.claimed_by_agent_id ?? null
     });
 
-    await this.broadcastQueueSnapshot();
+    // Only an escalated chat sits in the queue, so only it can change the queue.
+    if (escalated) {
+      await this.broadcastQueueSnapshot();
+    }
   }
 
   /** Resolve the adapter for a business's escalated conversation, falling back to the global singleton. */

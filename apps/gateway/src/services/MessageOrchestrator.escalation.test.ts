@@ -34,8 +34,8 @@ mock.module("./AgentHub", () => ({
   agentHub: {
     isAgentConnected: (agent_id?: string | null) => Boolean(agent_id && connectedAgents.has(agent_id)),
     hasConnectedAgents: () => connectedAgents.size > 0,
-    handleEscalatedUserMessage: async () => {
-      hubCalls.push("handleEscalatedUserMessage");
+    notifyConversationMessage: async () => {
+      hubCalls.push("notifyConversationMessage");
     },
     notifyConversationQueued: async () => {
       hubCalls.push("notifyConversationQueued");
@@ -108,7 +108,7 @@ describe("human handover boundary", () => {
     await run();
 
     expect(forwarded).toEqual(["any update on my refund?"]);
-    expect(hubCalls).toContain("handleEscalatedUserMessage");
+    expect(hubCalls).toContain("notifyConversationMessage");
   });
 
   test("a claimed chat goes to the human agent instead of the AI", async () => {
@@ -122,7 +122,7 @@ describe("human handover boundary", () => {
     await run();
 
     expect(forwarded).toEqual([]);
-    expect(hubCalls).toContain("handleEscalatedUserMessage");
+    expect(hubCalls).toContain("notifyConversationMessage");
   });
 
   test("a released chat goes back to the AI", async () => {
@@ -135,7 +135,8 @@ describe("human handover boundary", () => {
     await run();
 
     expect(forwarded).toEqual(["any update on my refund?"]);
-    expect(hubCalls).toEqual([]);
+    // Not escalated, but still mirrored so the inbox updates live.
+    expect(hubCalls).toEqual(["notifyConversationMessage"]);
   });
 
   test("a claim held by a disconnected agent returns to the queue and the AI", async () => {
