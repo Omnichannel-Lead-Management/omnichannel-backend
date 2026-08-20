@@ -1,4 +1,3 @@
-/** Entry in the conversation history as stored by the orchestrator */
 export interface ChatHistoryEntry {
   is_from_user: boolean;
   text: string;
@@ -17,23 +16,13 @@ export interface PlatformCapabilities {
 
 export interface ChatRequest {
   message: string;
-  /** Correlation ID propagated from orchestrator (X-Request-ID) */
   request_id?: string;
-  /**
-   * Tenant the message belongs to. Must be forwarded to downstream agents —
-   * without it they fall back to their default business and every tenant gets
-   * the demo business's flows, FAQs and prices.
-   */
   business_id?: string;
-  /** Platform-specific user identifier (e.g. "tg_123456") */
   messenger_id: string;
-  /** Source platform name */
   platform?: string;
   language?: LanguageCode | DetectedLanguageTag;
   language_tag?: DetectedLanguageTag;
-  /** Publicly accessible URL of an image the user sent — triggers photo agent */
   image_url?: string;
-  /** Accepts either orchestrator format or role/content format */
   history?: ChatHistoryEntry[];
   user_info?: {
     first_name?: string;
@@ -42,11 +31,9 @@ export interface ChatRequest {
     phone?: string;
     linked_user_id?: string | null;
   };
-  /** Interactive features supported by the originating platform */
   platform_capabilities?: PlatformCapabilities;
 }
 
-/** A single message in the agent's response */
 export type AgentMessage =
   | { type: "text"; text: string }
   | { type: "photo"; url: string; caption?: string }
@@ -70,6 +57,8 @@ export interface ChatResponse {
   agent: string;
   messages: AgentMessage[];
   escalated?: boolean;
+  escalation_tag?: string;
+  escalation_summary?: string;
   routing?: {
     intent: string;
     summary: string;
@@ -88,10 +77,7 @@ export interface AgentConfig {
   name: string;
   description: string;
   url: string;
-  /** Path of the chat endpoint, e.g. "/chat" or "/api/order-chat" */
   chatPath: string;
-  /** Transform the outgoing request body for this agent */
   buildRequest: (summary: string, req: ChatRequest) => Record<string, unknown>;
-  /** Normalize the agent's raw response into messages + escalation flag */
   parseResponse: (raw: unknown) => AgentForwardResult;
 }
