@@ -12,10 +12,7 @@ import {
 import { BusinessHoursError, parseStoredBusinessHours } from "../services/BusinessHours";
 import { buildBusinessAnalytics, resolveRange } from "../services/AnalyticsService";
 
-/**
- * Strip secrets before returning a business row over the API. telegram_bot_token,
- * telegram_webhook_secret and whatsapp_instance_token must never appear here.
- */
+/** Strip secrets before returning a business row over the API. */
 function toPublicBusiness(business: Awaited<ReturnType<typeof getBusinessById>>) {
   if (!business) return null;
 

@@ -1,15 +1,5 @@
 import { GoogleGenAI } from "@google/genai";
 
-/**
- * Gemini client used to pull booking details out of a customer's message.
- *
- * Mirrors the routing service's client: Vertex AI with Application Default
- * Credentials when GOOGLE_CLOUD_PROJECT is set, falling back to the Gemini
- * Developer API key otherwise. Unlike routing, the client is optional — when
- * nothing is configured the booking flow degrades to asking the customer for a
- * date and time in plain words rather than failing the request.
- */
-
 const GEMINI_MODEL = process.env.GEMINI_MODEL ?? "gemini-2.5-flash";
 const VERTEX_LOCATION = process.env.GOOGLE_CLOUD_LOCATION ?? "us-central1";
 

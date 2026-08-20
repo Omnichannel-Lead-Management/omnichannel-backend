@@ -245,10 +245,6 @@ export function getAvailableAppointmentSlots(
     closeMinutes: closeHourLocal() * 60,
   }
 ): AppointmentAvailabilitySlot[] {
-  // `date` is a business-local calendar date. Deriving the window from the same
-  // opening-hours config the booking path validates against keeps the two in
-  // step — otherwise a customer could be offered a slot that booking rejects.
-  // A null window means the business is closed that day: no slots at all.
   if (!window) return [];
 
   const requestedDateStart = localDateTimeToUtc(date, "00:00");

@@ -1,23 +1,11 @@
-/**
- * StorageService
- *
- * Uploads files to PocketBase bucket storage and returns a public URL.
- * Used to host user-sent images (e.g. Telegram photos) so the vision API
- * can reach them over a public URL.
- */
 
 import { CORRELATION_ID_HEADER } from "../middleware/correlationId";
 
-// Internal URL used for API calls (can be a Docker service name)
 const POCKETBASE_URL = (process.env.POCKETBASE_URL ?? "").replace(/\/$/, "");
-// Public URL used in returned file links so external services (vision API) can fetch them
 const POCKETBASE_PUBLIC_URL = (process.env.POCKETBASE_PUBLIC_URL ?? POCKETBASE_URL).replace(/\/$/, "");
 const POCKETBASE_COLLECTION = process.env.POCKETBASE_COLLECTION ?? "media_uploads";
 
-/**
- * Upload a file buffer to PocketBase.
- * Returns the public file URL, or null if PocketBase is not configured.
- */
+/** Upload a file buffer to PocketBase. */
 
 export async function uploadToStorage(
   data: Uint8Array,

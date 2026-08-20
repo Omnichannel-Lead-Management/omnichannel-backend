@@ -9,11 +9,7 @@ import {
   type NotificationType
 } from "./store";
 
-/**
- * Lead-manager posts lead events here (services/notify.ts). Map them onto the
- * in-app notification shape the dashboard renders. action_url must stay within
- * the dashboard's allow-listed routes or the client drops it.
- */
+/** Lead-manager posts lead events here (services/notify.ts). */
 function fromLeadEvent(body: Record<string, unknown>): {
   type: NotificationType;
   title: string;
@@ -52,18 +48,11 @@ function fromLeadEvent(body: Record<string, unknown>): {
   return null;
 }
 
-// The return type is inferred: annotating it `: Elysia` erases the route table
-// and trips Elysia's generic variance check.
 export function createApp(db: Database) {
   return (
     new Elysia()
       .get("/health", () => ({ status: "ok", service: "notification" }))
 
-      /**
-       * Kept at the original path so lead-manager needs no change. The event is
-       * now persisted as an in-app notification. Email delivery itself is still
-       * not implemented — the response says so rather than implying a send.
-       */
       .post(
         "/api/notifications/email",
         ({ body, set }) => {
@@ -114,7 +103,6 @@ export function createApp(db: Database) {
         { body: t.Any() }
       )
 
-      // ── In-app notification centre (proxied by the gateway) ──
       .get(
         "/api/businesses/:businessId/notifications",
         ({ params, query }) => {

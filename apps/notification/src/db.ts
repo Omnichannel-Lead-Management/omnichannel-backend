@@ -2,11 +2,7 @@ import { Database } from "bun:sqlite";
 import { mkdirSync } from "node:fs";
 import { dirname } from "node:path";
 
-/**
- * The notification service now keeps a durable record of every event it is told
- * about, so the dashboard's notification centre has something to read. Email
- * delivery is still unimplemented — see the note in index.ts.
- */
+/** Durable record of every event the service is told about. */
 export function createDatabase(path = process.env.DATABASE_PATH ?? "./data/notification.db"): Database {
   if (path !== ":memory:") mkdirSync(dirname(path), { recursive: true });
 

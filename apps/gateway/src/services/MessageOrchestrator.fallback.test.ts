@@ -1,23 +1,11 @@
 import { describe, expect, test, mock } from "bun:test";
 import type { AIRequestPayload } from "../platforms/PlatformAdapter";
 
-/**
- * A failed routing agent used to return without sending anything, so a Vertex AI
- * outage looked identical to a working system from the customer's side. These
- * tests pin the fallback that replaced that silent drop.
- *
- * The DB and agent hub are stubbed so the escalation branch can be exercised
- * without a live Postgres.
- */
-
-// A chainable no-op stand-in for the drizzle query builder.
 const noopChain: any = new Proxy(function () {} as any, {
   get: (_t, prop) => (prop === "then" ? undefined : () => noopChain),
   apply: () => noopChain
 });
 
-// Rows the escalation UPDATE reports back: one row = this message queued the
-// chat, none = it was already waiting in the queue.
 let queuedRows: Array<{ id: number }> = [{ id: 1 }];
 
 mock.module("../db", () => ({
@@ -145,8 +133,6 @@ describe("routing failure fallback", () => {
   });
 
   test("an escalated chat is not told about a technical problem", async () => {
-    // The escalation notice is the correct message here; a fallback on top of it
-    // would contradict it.
     queuedRows = [{ id: 1 }];
     const { run, sent, fallbacks } = harness({
       ok: true,
@@ -159,9 +145,6 @@ describe("routing failure fallback", () => {
   });
 
   test("a chat already waiting in the queue is not re-notified, but is still answered", async () => {
-    // The customer keeps chatting while waiting for an agent: repeating "your
-    // chat has been escalated" on every message would read as a stuck bot, and
-    // silence would be worse.
     queuedRows = [];
     const { run, sent, fallbacks } = harness({
       ok: true,

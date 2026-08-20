@@ -27,7 +27,6 @@ function toDto(lead: Lead) {
 }
 
 export const leadsRoutes = new Elysia({ prefix: "/api/leads" })
-  // Create ----------------------------------------------------------------
   .post(
     "/",
     ({ body, set }) => {
@@ -54,7 +53,6 @@ export const leadsRoutes = new Elysia({ prefix: "/api/leads" })
     }
   )
 
-  // Real-time stream (SSE) — declared before "/:id" so it isn't shadowed ---
   .get(
     "/stream",
     ({ query }) => {
@@ -76,14 +74,12 @@ export const leadsRoutes = new Elysia({ prefix: "/api/leads" })
                 )
               );
             } catch {
-              /* stream already closed */
             }
           });
           heartbeat = setInterval(() => {
             try {
               controller.enqueue(encoder.encode(`: ping\n\n`));
             } catch {
-              /* closed */
             }
           }, 25000);
         },
@@ -108,7 +104,6 @@ export const leadsRoutes = new Elysia({ prefix: "/api/leads" })
     }
   )
 
-  // List ------------------------------------------------------------------
   .get(
     "/",
     ({ query }) => {
@@ -128,7 +123,6 @@ export const leadsRoutes = new Elysia({ prefix: "/api/leads" })
     }
   )
 
-  // Detail (+ activities) -------------------------------------------------
   .get(
     "/:id",
     ({ params, query, set }) => {
@@ -150,7 +144,6 @@ export const leadsRoutes = new Elysia({ prefix: "/api/leads" })
     }
   )
 
-  // Update ----------------------------------------------------------------
   .patch(
     "/:id",
     ({ params, body, set }) => {
@@ -178,7 +171,6 @@ export const leadsRoutes = new Elysia({ prefix: "/api/leads" })
     }
   )
 
-  // Assign (explicit agent, or auto round-robin) --------------------------
   .post(
     "/:id/assign",
     ({ params, body, set }) => {

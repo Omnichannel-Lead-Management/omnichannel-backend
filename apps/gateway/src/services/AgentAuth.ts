@@ -3,7 +3,6 @@ type AgentAuthMode = "none" | "static" | "jwt";
 export interface AgentAuthIdentity {
   agent_id?: string;
   agent_name?: string;
-  /** Business this agent is scoped to. Undefined = "super agent" (sees/acts on every business). */
   business_id?: string;
   claims?: Record<string, unknown>;
 }
@@ -57,7 +56,6 @@ function readNumericClaim(payload: Record<string, unknown>, key: string): number
 
 export class AgentAuthService {
   private mode: AgentAuthMode;
-  /** token -> business_id (undefined = super agent, sees/acts on every business) */
   private staticTokens: Map<string, string | undefined>;
   private jwtSecret: string;
   private jwtIssuer: string | null;
@@ -67,9 +65,6 @@ export class AgentAuthService {
   constructor() {
     this.mode = parseMode(process.env.AGENT_AUTH_MODE);
 
-    // Format: "token1:biz_001,token2:biz_002,token3" — token3 (no colon) is a super
-    // agent with no business restriction. Kept backward compatible with the plain
-    // "token1,token2" format used before multi-tenancy existed.
     this.staticTokens = new Map(
       (process.env.AGENT_AUTH_TOKENS || "")
         .split(",")

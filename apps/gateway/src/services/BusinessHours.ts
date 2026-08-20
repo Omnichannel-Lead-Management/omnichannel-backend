@@ -1,16 +1,3 @@
-/**
- * Per-business opening hours.
- *
- * Stored on the business row as a JSON string and served as a plain object, so
- * the dashboard and the Appointment service both read the same shape:
- *
- *   { "monday": { "enabled": true, "open": "09:00", "close": "17:00" }, ... }
- *
- * The Appointment service used to gate availability on the global
- * BUSINESS_OPEN_HOUR / BUSINESS_CLOSE_HOUR env vars, which meant every tenant
- * shared one schedule. It now reads this per-business record and only falls back
- * to those env vars when a business has never saved any hours.
- */
 
 export const BUSINESS_DAYS = [
   "monday",
@@ -41,10 +28,7 @@ function toMinutes(time: string): number {
 
 export class BusinessHoursError extends Error {}
 
-/**
- * Validate and normalize an incoming hours object. Throws BusinessHoursError
- * with a field-level message the dashboard can show verbatim.
- */
+/** Validate and normalize an incoming hours object. */
 export function parseBusinessHoursInput(value: unknown): BusinessHours {
   if (!value || typeof value !== "object" || Array.isArray(value)) {
     throw new BusinessHoursError("business_hours must be an object keyed by day name");
@@ -76,8 +60,6 @@ export function parseBusinessHoursInput(value: unknown): BusinessHours {
     if (!TIME_RE.test(open) || !TIME_RE.test(close)) {
       throw new BusinessHoursError(`${day} needs an open and close time in HH:MM`);
     }
-    // Overnight hours are out of scope: the availability walker assumes a slot
-    // starts and ends on the same local calendar day.
     if (toMinutes(close) <= toMinutes(open)) {
       throw new BusinessHoursError(`${day} close time must be after its open time`);
     }
@@ -88,7 +70,7 @@ export function parseBusinessHoursInput(value: unknown): BusinessHours {
   return result;
 }
 
-/** Read hours off a stored JSON string. Malformed data reads as "not set". */
+/** Read hours off a stored JSON string. */
 export function parseStoredBusinessHours(stored: string | null | undefined): BusinessHours | null {
   if (!stored) return null;
   try {

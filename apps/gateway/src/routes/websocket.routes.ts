@@ -1,8 +1,3 @@
-/**
- * WebSocket Routes
- *
- * Handles real-time web chat connections
- */
 
 import { Elysia } from "elysia";
 import { getPlatformAdapter } from "../platforms";
@@ -43,10 +38,6 @@ function rejectRateLimitedMessage(ws: any, retryAfterMs: number): void {
 }
 
 export const websocketRoutes = new Elysia()
-  /**
-   * WebSocket endpoint for web chat
-   * Path: /ws/chat
-   */
   .ws("/ws/chat", {
     beforeHandle({ request, set }) {
       if (isOriginAllowed(request.headers.get("origin"))) return;
@@ -59,19 +50,16 @@ export const websocketRoutes = new Elysia()
     },
 
     open(ws) {
-      // Generate unique session ID for this connection
       const session_id = generateWebSessionId();
       const request_id = generateCorrelationId();
       (ws.data as WebSocketData).session_id = session_id;
       (ws.data as WebSocketData).request_id = request_id;
 
-      // Register connection with WebAdapter
       const adapter = getPlatformAdapter("web") as WebAdapter;
       if (adapter) {
         adapter.registerConnection(session_id, ws as any);
       }
 
-      // Send welcome message
       ws.send(JSON.stringify({
         type: "connected",
         session_id,
@@ -229,7 +217,6 @@ export const websocketRoutes = new Elysia()
           return;
         }
 
-        // Validate message
         if (!payload?.message || typeof payload.message !== "string") {
           ws.send(JSON.stringify({
             type: "error",
@@ -246,7 +233,6 @@ export const websocketRoutes = new Elysia()
           `platform=web session_id=${session_id} text="${payload.message}"`
         );
 
-        // Process through orchestrator
         const result = await messageOrchestrator.processIncomingMessage({
           request_id,
           platform: "web",
@@ -288,7 +274,6 @@ export const websocketRoutes = new Elysia()
       const request_id = (ws.data as WebSocketData).request_id;
       if (!session_id) return;
 
-      // Unregister connection
       const adapter = getPlatformAdapter("web") as WebAdapter;
       if (adapter) {
         adapter.unregisterConnection(session_id);

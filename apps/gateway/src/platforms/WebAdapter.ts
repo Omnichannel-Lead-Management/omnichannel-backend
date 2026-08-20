@@ -1,18 +1,9 @@
 import type { AgentMessage, PlatformAdapter, PlatformCapabilities } from "./PlatformAdapter";
 import type { ServerWebSocket } from "bun";
 
-/**
- * WebAdapter
- *
- * Handles web chat via WebSocket connections.
- * Each web user gets a unique session ID.
- * All interactive features are fully supported — the client receives the raw
- * structured message and renders buttons/lists itself.
- */
 export class WebAdapter implements PlatformAdapter {
   readonly name = "web";
 
-  /** Web clients receive structured JSON so every feature is available. */
   readonly capabilities: PlatformCapabilities = {
     quick_replies: true,
     url_buttons: true,
@@ -56,11 +47,7 @@ export class WebAdapter implements PlatformAdapter {
     }
   }
 
-  /**
-   * Send an interactive message.
-   * The full structured object is forwarded to the client via WebSocket so the
-   * frontend can render native buttons, lists, and URL buttons.
-   */
+  /** Send an interactive message. */
   async sendInteractive(
     messenger_id: string,
     message: Extract<AgentMessage, { type: "interactive" }>,

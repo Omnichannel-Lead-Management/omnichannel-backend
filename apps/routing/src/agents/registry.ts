@@ -19,18 +19,12 @@ const LEAD_MANAGER_URL      = process.env.LEAD_MANAGER_URL      ?? "http://local
 const CHATBOT_ENGINE_URL    = process.env.CHATBOT_ENGINE_URL    ?? "http://localhost:3003";
 const APPOINTMENT_SERVICE_URL = process.env.APPOINTMENT_SERVICE_URL ?? "http://localhost:3005";
 
-/**
- * Shared response shape returned by all downstream agents.
- */
 interface DownstreamResponse {
   success: boolean;
   messages?: AgentMessage[];
 }
 
-/**
- * Default parseResponse — all downstream agents return { success, messages, escalated? }.
- * Falls back gracefully for agents that haven't adopted the unified protocol yet.
- */
+/** Default parseResponse for downstream agents that return the standard reply shape. */
 function defaultParseResponse(raw: unknown): AgentForwardResult {
   const r = raw as DownstreamResponse & { escalated?: boolean };
   const messages: AgentMessage[] =
@@ -85,14 +79,6 @@ function resolveLanguageCode(req: ChatRequest): LanguageCode {
   return languageTagToCode(resolveLanguageTag(req));
 }
 
-/**
- * Central agent registry for Lead Management Platform.
- * To add a new agent: add an entry here and set its env var for the URL.
- * All agents must expose POST /chat accepting { message, messenger_id, language? }
- * and returning { success, messages: AgentMessage[] }.
- *
- * Special agent "general" is handled locally in the router — it has no URL.
- */
 export const agentRegistry: Record<string, AgentConfig> = {
   general: {
     name: "general",
@@ -137,8 +123,6 @@ export const agentRegistry: Record<string, AgentConfig> = {
         messenger_id: req.messenger_id,
         business_id: req.business_id,
         platform: req.platform,
-        // Bookings are stored against a customer name, so pass through whatever
-        // the platform knows rather than filing everyone as "Customer".
         user_info: req.user_info,
         language: resolveLanguageCode(req),
         language_tag: resolveLanguageTag(req),

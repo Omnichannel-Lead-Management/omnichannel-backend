@@ -1,11 +1,3 @@
-/**
- * VoiceService
- *
- * Integrates with the Speech-to-Text / Text-to-Speech API (Txt-Spch-And-Spch-Txt).
- * - transcribeAudio: converts an audio URL to text via the STT endpoint
- * - synthesizeSpeech: converts text to audio, uploads to PocketBase, returns public URL
- * - uploadVoiceToStorage: helper to upload audio bytes to the voice_messages collection
- */
 
 import { CORRELATION_ID_HEADER } from "../middleware/correlationId";
 import { uploadToStorage } from "./StorageService";
@@ -31,9 +23,7 @@ function inferAudioMimeType(filename: string): string {
   return "application/octet-stream";
 }
 
-/**
- * Upload raw audio bytes to the PocketBase voice_messages collection.
- */
+/** Upload raw audio bytes to the PocketBase voice_messages collection. */
 export async function uploadVoiceToStorage(
   data: Uint8Array,
   filename: string,
@@ -43,10 +33,7 @@ export async function uploadVoiceToStorage(
   return uploadToStorage(data, filename, mimeType, requestId, VOICE_PB_COLLECTION);
 }
 
-/**
- * Call the STT API with a publicly accessible audio URL.
- * Returns the transcription and detected language, or null if unavailable/failed.
- */
+/** Call the STT API with a publicly accessible audio URL. */
 export async function transcribeAudio(
   audioUrl: string,
   requestId?: string
@@ -76,10 +63,7 @@ export async function transcribeAudio(
   return { text: result.text.trim(), language: result.language ?? "en" };
 }
 
-/**
- * Call the STT API with raw audio bytes using multipart form-data.
- * Returns the transcription and detected language, or null if unavailable/failed.
- */
+/** Call the STT API with raw audio bytes using multipart form-data. */
 export async function transcribeAudioFile(
   data: Uint8Array,
   filename: string,
@@ -114,11 +98,7 @@ export async function transcribeAudioFile(
   return { text: result.text.trim(), language: result.language ?? "en" };
 }
 
-/**
- * Call the TTS API to synthesize text, then download the audio and upload it to
- * PocketBase so it is accessible via a stable public URL.
- * Returns the public PocketBase URL, or null if unavailable/failed.
- */
+/** Synthesize text to speech and store the audio at a stable public URL. */
 export async function synthesizeSpeech(
   text: string,
   requestId?: string,
@@ -153,7 +133,6 @@ export async function synthesizeSpeech(
   if (!ttsResult.audio_url) return null;
   const resolvedFilename = (ttsResult.filename || requestedFilename).trim() || requestedFilename;
 
-  // Download the generated audio from the TTS service (internal URL)
   const audioResponse = await fetch(ttsResult.audio_url, {
     headers: requestId ? { [CORRELATION_ID_HEADER]: requestId } : {}
   });
@@ -167,6 +146,5 @@ export async function synthesizeSpeech(
   const responseMimeType = audioResponse.headers.get("content-type")?.split(";")[0].trim() ?? "";
   const mimeType = responseMimeType || inferAudioMimeType(resolvedFilename);
 
-  // Upload to PocketBase voice_messages collection and return the public URL
   return uploadVoiceToStorage(audioData, resolvedFilename, mimeType, requestId);
 }

@@ -49,7 +49,6 @@ describe("notification service", () => {
 
     expect(response.status).toBe(201);
     expect(body.stored).toBe(true);
-    // Email delivery is still a stub; the response must not imply it sent.
     expect(body.email_sent).toBe(false);
     expect(body.notification.type).toBe("lead");
     expect(body.notification.title).toBe("New lead");

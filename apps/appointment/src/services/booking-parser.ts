@@ -1,26 +1,11 @@
 import { getGenAiClient, GEMINI_MODEL } from "../genaiClient";
 import { utcToLocalDate } from "./business-hours";
 
-/**
- * Turns a customer's booking message into structured fields.
- *
- * The routing service already rewrites each message into a self-contained
- * summary ("The user wants to book a haircut tomorrow at 3pm"), so a single
- * extraction pass is enough — this service never sees the raw history.
- *
- * Gemini does the work because customers write in English, Sinhala and Tamil
- * and phrase times freely. Anything it returns is re-validated here; the model
- * is never trusted to produce a well-formed date or time.
- */
-
 export interface BookingDetails {
-  /** "YYYY-MM-DD" in business-local time */
   date: string | null;
-  /** "HH:MM" 24h in business-local time */
   time: string | null;
   service: string | null;
   customerName: string | null;
-  /** Customer wants to cancel/reschedule rather than book */
   intent: "book" | "other";
 }
 
@@ -36,7 +21,6 @@ function normalizeDate(value: unknown): string | null {
   if (typeof value !== "string") return null;
   const trimmed = value.trim();
   if (!/^\d{4}-\d{2}-\d{2}$/.test(trimmed)) return null;
-  // Reject impossible dates like 2026-02-31 that match the shape.
   const parsed = new Date(`${trimmed}T00:00:00.000Z`);
   if (Number.isNaN(parsed.getTime())) return null;
   return parsed.toISOString().slice(0, 10) === trimmed ? trimmed : null;

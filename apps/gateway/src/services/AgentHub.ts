@@ -11,7 +11,6 @@ interface AgentSocketData {
 interface AgentRegistrationPayload {
   agent_id?: string;
   agent_name?: string;
-  /** Business this agent is scoped to. Undefined = "super agent" (sees/acts on every business). */
   business_id?: string;
 }
 
@@ -46,7 +45,6 @@ export interface EscalatedChatSummary {
 interface AgentConnection {
   agent_id: string;
   agent_name: string;
-  /** Undefined = super agent (sees/acts on every business). */
   business_id?: string;
   ws: ServerWebSocket<AgentSocketData>;
   connected_at: string;
@@ -87,7 +85,6 @@ export class AgentHub {
       try {
         existing.ws.close(4001, "Session replaced");
       } catch {
-        // Ignore close errors
       }
 
       this.agents.delete(agent_id);
@@ -169,10 +166,7 @@ export class AgentHub {
     });
   }
 
-  /**
-   * Send every connected agent their own filtered queue snapshot — super agents see
-   * every business's escalated chats, scoped agents only see their own business's.
-   */
+  /** Send every connected agent the queue snapshot filtered to the businesses they may see. */
   async broadcastQueueSnapshot(): Promise<void> {
     for (const connection of this.agents.values()) {
       const chats = await this.getEscalatedChats(connection.business_id);
@@ -234,8 +228,6 @@ export class AgentHub {
 
     const historyPage = await this.getHistory(normalizedPlatform, messenger_id, 30, undefined, targetBusinessId);
 
-    // The claim is the actual handover: until now the AI was still answering,
-    // so the customer has to be told a human has taken over.
     const claimedMessage = "A customer care agent has joined this chat and will take it from here.";
     const adapter = await this.resolveAdapter(normalizedPlatform, targetBusinessId);
     if (adapter) {
@@ -285,9 +277,6 @@ export class AgentHub {
       return { success: false, error: "Conversation is not escalated." };
     }
 
-    // A claimed chat belongs to the agent holding it. An unclaimed one is still
-    // being answered by the AI and only sits in the queue, so any agent of this
-    // business may clear it out.
     if (conversation.claimed_by_agent_id && conversation.claimed_by_agent_id !== agent_id) {
       return { success: false, error: "Only the claiming agent can release this conversation." };
     }
@@ -312,8 +301,6 @@ export class AgentHub {
         )
       );
 
-    // Nobody ever joined an unclaimed chat, so telling that customer their
-    // conversation with customer care is "complete" would make no sense.
     const deEscalationMessage = wasClaimed
       ? "Your conversation with customer care is complete. You can continue chatting with the AI assistant."
       : "Our customer care team has closed this request. You can keep chatting with the AI assistant here.";
@@ -506,8 +493,6 @@ export class AgentHub {
       from: "user",
       text: payload.text,
       timestamp: payload.timestamp || new Date().toISOString(),
-      // A queued chat is still being answered by the AI; only a claimed one
-      // belongs to a human, and the dashboard needs to tell them apart.
       escalation_status: conversation.claimed_by_agent_id ? "claimed" : "queued",
       claimed_by_agent_id: conversation.claimed_by_agent_id
     });
@@ -515,11 +500,7 @@ export class AgentHub {
     await this.broadcastQueueSnapshot();
   }
 
-  /**
-   * Resolve the adapter to send through for a business's escalated conversation —
-   * that business's own bot credentials, falling back to the global singleton
-   * (legacy single-tenant .env-based setup) if the business has none configured.
-   */
+  /** Resolve the adapter for a business's escalated conversation, falling back to the global singleton. */
   private async resolveAdapter(platform: string, business_id: string) {
     if (business_id !== "biz_default") {
       const business = await getBusinessById(business_id);
@@ -642,7 +623,6 @@ export class AgentHub {
     try {
       ws.send(JSON.stringify(payload));
     } catch {
-      // Ignore websocket send failures
     }
   }
 

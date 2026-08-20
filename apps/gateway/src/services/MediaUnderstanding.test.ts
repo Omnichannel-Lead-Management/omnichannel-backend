@@ -57,8 +57,6 @@ describe("formatTelegramWebhook media parsing", () => {
   const from = { id: 42, first_name: "Kasun", language_code: "en" };
   const chat = { id: 42, type: "private" };
 
-  // Regression: a captionless photo used to fall through `message.text ||
-  // message.caption || "[Voice Message]"` and get labelled a voice message.
   test("a photo with no caption is not labelled a voice message", () => {
     const result = formatTelegramWebhook({
       message: { from, chat, message_id: 1, photo: [{ file_id: "small" }, { file_id: "large" }] }

@@ -36,10 +36,6 @@ export function createAppointmentRoutes(db: Database): Elysia {
       }
 
       try {
-        // Only enforce opening hours for businesses that have actually saved
-        // them. With no saved hours this path behaves exactly as before, rather
-        // than retroactively rejecting bookings against a global default the
-        // tenant never chose.
         const hours = await getBusinessHours(validation.data.businessId);
         if (hours) {
           const startUtc = new Date(validation.data.startTime);
@@ -122,8 +118,6 @@ export function createAppointmentRoutes(db: Database): Elysia {
       try {
         const { businessId, date } = validation.data;
 
-        // Per-business hours when the owner has saved any, else the global
-        // env window. A closed day resolves to null and yields no slots.
         const hours = await getBusinessHours(businessId);
         const window = resolveDayWindow(hours, date);
 

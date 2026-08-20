@@ -56,7 +56,6 @@ export function describeAllowedCorsOrigins(): string {
 }
 
 export function isOriginAllowed(origin: string | null | undefined): boolean {
-  // Non-browser clients (curl, internal services) typically have no Origin header.
   if (!origin) return true;
   return allowedOriginSet.has(origin);
 }

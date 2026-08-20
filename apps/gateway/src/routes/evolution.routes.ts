@@ -1,10 +1,3 @@
-/**
- * Evolution API Webhook Routes
- *
- * Multi-tenant WhatsApp webhook — each business gets its own Evolution API
- * "instance" (see BusinessRegistry.connectWhatsAppEvolution) and its own
- * webhook path here, so inbound events resolve to that business's business_id.
- */
 
 import { Elysia, t } from "elysia";
 import {
@@ -46,10 +39,7 @@ function isDuplicateEvolutionMessage(messageId: string): boolean {
   return false;
 }
 
-/**
- * Resolve an inbound WhatsApp photo or voice note to text before the orchestrator
- * sees it, mirroring the Telegram path. Downstream services only ever get text.
- */
+/** Resolve an inbound WhatsApp photo or voice note to text for the orchestrator. */
 async function resolveEvolutionMedia(
   message: Record<string, unknown> & {
     _media_kind?: string;
@@ -145,8 +135,6 @@ export const evolutionRoutes = new Elysia({ prefix: "/webhook" })
           return { ok: false, error: "Business not found or WhatsApp not connected" };
         }
 
-        // Defense in depth: confirm the event actually belongs to this business's instance,
-        // in case someone guesses a business_id path without knowing the real instance name.
         const payloadInstance =
           typeof (body as { instance?: unknown })?.instance === "string"
             ? (body as { instance: string }).instance
@@ -189,7 +177,6 @@ export const evolutionRoutes = new Elysia({ prefix: "/webhook" })
           `platform=whatsapp(evolution) business_id=${businessId} messenger_id=${formattedMessage.messenger_id} message_id=${messageId || "unknown"}`
         );
 
-        // Media is resolved to text before dispatch — downstream only sees text.
         void resolveEvolutionMedia(formattedMessage, business, correlationId)
           .catch((err) =>
             logWithCorrelation(

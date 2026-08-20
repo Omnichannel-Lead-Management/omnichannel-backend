@@ -1,9 +1,3 @@
-/**
- * Hemas Messaging Orchestrator
- *
- * Main application entry point
- * Pure routing/storage/forwarding - NO AI logic here
- */
 
 import { Elysia } from "elysia";
 import { cors } from "@elysiajs/cors";
@@ -30,14 +24,11 @@ import {
   isOriginAllowed
 } from "./services/SecurityConfig";
 
-// Environment variables
 const PORT = process.env.PORT || 3000;
 const NODE_ENV = process.env.NODE_ENV || "development";
 const allowedCorsOrigins = getAllowedCorsOrigins();
 
-/**
- * Initialize application
- */
+/** Initialize application */
 async function init() {
   console.log("🚀 Starting Messaging Orchestrator...");
   console.log(`📍 Environment: ${NODE_ENV}`);
@@ -50,16 +41,13 @@ async function init() {
     );
   }
 
-  // Initialize database
   await initDatabase();
 
-  // Initialize platform adapters
   await initializePlatforms();
 
   console.log("✅ Initialization complete");
 }
 
-// Create Elysia app
 const app = new Elysia()
   .use(cors({
     origin: (request) => isOriginAllowed(request.headers.get("origin")),
@@ -80,7 +68,6 @@ const app = new Elysia()
     },
     path: "/docs"
   }))
-  // Root endpoint
   .get("/", () => ({
     name: "Messaging Orchestrator",
     version: "1.0.0",
@@ -104,14 +91,11 @@ const app = new Elysia()
       agent_websocket: "WS /ws/agents"
     }
   }))
-  // Register routes
   .use(messagingRoutes)
   .use(uploadRoutes)
   .use(agentsRoutes)
   .use(leadsRoutes)
   .use(appointmentsProxyRoutes)
-  // Before businessesRoutes: both own paths under /api/businesses/:id, and the
-  // more specific proxy routes must be matched first.
   .use(chatbotProxyRoutes)
   .use(notificationsProxyRoutes)
   .use(businessesRoutes)
@@ -121,7 +105,6 @@ const app = new Elysia()
   .use(evolutionRoutes)
   .use(websocketRoutes)
   .use(agentWebsocketRoutes)
-  // Error handler
   .onError(({ code, error, set }) => {
     console.error(`❌ Error [${code}]:`, error);
 
@@ -150,7 +133,6 @@ const app = new Elysia()
   })
   .listen(PORT);
 
-// Initialize and start
 await init();
 
 console.log(`

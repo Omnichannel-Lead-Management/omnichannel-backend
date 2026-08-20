@@ -1,8 +1,5 @@
 import { afterAll, beforeEach, describe, expect, test } from "bun:test";
 
-// A stand-in Chatbot Builder, so these tests cover the proxy's behaviour rather
-// than the real service's. Started before the route module is imported because
-// chatbot.proxy.routes.ts reads CHATBOT_SERVICE_URL once at module scope.
 const PORT = 3700 + Math.floor(Math.random() * 200);
 const received: Array<{ method: string; path: string; body: string }> = [];
 

@@ -17,14 +17,6 @@ import {
 } from "../services/business-hours";
 import { getBusinessHours } from "../services/business-hours-provider";
 
-/**
- * Conversational booking endpoint called by the routing service.
- *
- * Routing forwards a self-contained summary plus the tenant's business_id; this
- * turns that into a real appointment row, or explains what it still needs. The
- * reply shape matches every other agent: { success, messages, escalated }.
- */
-
 type LanguageTag = "english" | "sinhala" | "tamil";
 
 interface QuickReply {
@@ -53,10 +45,7 @@ function pick(language: LanguageTag, english: string, sinhala: string, tamil: st
   return english;
 }
 
-/**
- * `knownDate` lets the prompt quote that day's hours when the customer has
- * already named a date; otherwise it quotes today's.
- */
+/** Ask the customer for a date and time, quoting the relevant day's opening hours. */
 function askForDateTime(
   language: LanguageTag,
   missing: "date" | "time" | "both",
@@ -150,8 +139,6 @@ export function createChatRoute(db: Database): Elysia {
         );
       }
 
-      // This tenant's saved hours, if any; null falls back to the global env
-      // window so an unconfigured business behaves exactly as before.
       const businessHours = await getBusinessHours(businessId);
 
       if (!details.date || !details.time) {

@@ -1,15 +1,6 @@
 import { describe, expect, test, mock, beforeEach } from "bun:test";
 import type { IncomingMessage } from "../platforms/PlatformAdapter";
 
-/**
- * Escalation only queues a chat for a human. The AI keeps answering until an
- * agent claims it, and answers again the moment the agent releases it — these
- * tests pin that handover boundary.
- *
- * The DB and agent hub are stubbed so the routing branch can run without a live
- * Postgres or a connected agent socket.
- */
-
 const updates: Array<Record<string, unknown>> = [];
 
 const noopChain: any = new Proxy(function () {} as any, {
@@ -107,8 +98,6 @@ beforeEach(() => {
 
 describe("human handover boundary", () => {
   test("a queued but unclaimed chat is still answered by the AI", async () => {
-    // The escalation is only a request for a human; muting the bot here left
-    // customers waiting in silence for an agent who had not arrived yet.
     connectedAgents.add("agent_1");
     const { run, forwarded } = harness({
       is_escalated: 1,
@@ -119,7 +108,6 @@ describe("human handover boundary", () => {
     await run();
 
     expect(forwarded).toEqual(["any update on my refund?"]);
-    // The agent queue still sees the traffic live.
     expect(hubCalls).toContain("handleEscalatedUserMessage");
   });
 
@@ -138,8 +126,6 @@ describe("human handover boundary", () => {
   });
 
   test("a released chat goes back to the AI", async () => {
-    // releaseChat clears the escalation columns, so the next message is an
-    // ordinary bot conversation again.
     const { run, forwarded } = harness({
       is_escalated: 0,
       escalation_status: "none",
@@ -165,7 +151,6 @@ describe("human handover boundary", () => {
       escalation_status: "queued",
       claimed_by_agent_id: null
     });
-    // Still escalated — another agent can pick it up.
     expect(updates[0]).not.toHaveProperty("is_escalated");
     expect(hubCalls).toContain("notifyConversationQueued");
     expect(sent.some((text) => text.includes("keep helping you"))).toBe(true);

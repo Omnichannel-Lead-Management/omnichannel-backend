@@ -41,7 +41,6 @@ class WsTestClient {
         const parsed = JSON.parse(event.data) as JsonEvent;
         client.pushEvent(parsed);
       } catch {
-        // Ignore malformed test events
       }
     };
 
@@ -80,7 +79,6 @@ class WsTestClient {
     try {
       this.ws.close(1000, "test done");
     } catch {
-      // Ignore close errors in smoke tests
     }
   }
 
@@ -134,7 +132,6 @@ async function waitForHealth(url: string, timeoutMs: number): Promise<void> {
         return;
       }
     } catch {
-      // Retry until timeout
     }
 
     await Bun.sleep(300);
@@ -160,7 +157,6 @@ async function startMockRoutingServer(port: number) {
     try {
       payload = JSON.parse(Buffer.concat(chunks).toString("utf8")) as Record<string, unknown>;
     } catch {
-      // fall back to empty payload
     }
 
     const message = typeof payload.message === "string" ? payload.message : "";
@@ -211,8 +207,6 @@ async function run(): Promise<void> {
     );
   }
 
-  // Isolate this run into its own throwaway schema so repeated runs don't
-  // accumulate data and can run concurrently against a shared Postgres instance.
   const schemaName = `smoke_${Date.now()}`;
   const orchestratorDir = process.cwd();
 

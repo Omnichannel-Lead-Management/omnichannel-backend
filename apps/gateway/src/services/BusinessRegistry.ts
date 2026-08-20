@@ -70,10 +70,7 @@ function optionalText(value: string | null | undefined): string | null | undefin
   return trimmed === "" ? null : trimmed;
 }
 
-/**
- * Update the owner-editable profile. Throws BusinessHoursError for invalid
- * hours so the route can return a 400 with the offending day.
- */
+/** Update the owner-editable profile. */
 export async function updateBusiness(
   id: string,
   patch: BusinessProfilePatch
@@ -116,8 +113,6 @@ export async function updateBusiness(
         : serializeBusinessHours(parseBusinessHoursInput(patch.business_hours));
   }
 
-  // chatbot-builder owns this flag; keep our display copy in step and write
-  // through so the bot's actual behaviour matches what the dashboard shows.
   if (patch.chatbot_enabled !== undefined) {
     changes.chatbot_enabled = patch.chatbot_enabled ? 1 : 0;
     await syncChatbotEnabled(id, patch.chatbot_enabled);
@@ -132,11 +127,7 @@ export async function updateBusiness(
   return await getBusinessById(id);
 }
 
-/**
- * Refresh our display copy of chatbot_enabled after chatbot-builder (the source
- * of truth) accepted a change directly. Called by the chatbot config proxy so
- * the mirror never drifts. Best-effort: never throws.
- */
+/** Refresh our display copy of chatbot_enabled after chatbot-builder (the source of truth) accepted a change directly. */
 export async function mirrorChatbotEnabled(business_id: string, enabled: boolean): Promise<void> {
   try {
     await db
@@ -151,11 +142,7 @@ export async function mirrorChatbotEnabled(business_id: string, enabled: boolean
   }
 }
 
-/**
- * Best-effort mirror of the enabled flag into chatbot-builder, which is the
- * source of truth for it. A failure here must not fail the profile save — the
- * route surfaces the warning instead.
- */
+/** Best-effort mirror of the enabled flag into chatbot-builder, which is the source of truth for it. */
 export async function syncChatbotEnabled(
   business_id: string,
   enabled: boolean
@@ -182,10 +169,7 @@ export async function syncChatbotEnabled(
   }
 }
 
-/**
- * Save a vendor's Telegram bot token, verify it, and point Telegram's webhook
- * at this business's dedicated path so inbound updates resolve to business_id.
- */
+/** Save and verify a business's Telegram bot token, then register its webhook. */
 export async function connectTelegram(
   business_id: string,
   bot_token: string
@@ -232,10 +216,7 @@ export async function connectTelegram(
   return { ok: true, bot_username: meJson.result?.username };
 }
 
-/**
- * Create a dedicated Evolution API "instance" for this business (one WhatsApp
- * number per vendor) and point its webhook at this gateway's business-scoped route.
- */
+/** Create this business's own Evolution API WhatsApp instance and point its webhook here. */
 export async function connectWhatsAppEvolution(
   business_id: string
 ): Promise<{ ok: true; instance_name: string; qrcode?: string }> {
@@ -336,11 +317,7 @@ export async function getEvolutionConnectionStatus(
   return { connected: state === "open", status: state };
 }
 
-/**
- * Construct a platform adapter scoped to one business, using that business's
- * own stored credentials — separate from the global .env-based singleton
- * adapters used by the legacy single-tenant webhook routes.
- */
+/** Construct a platform adapter scoped to one business's own stored credentials. */
 export function resolveAdapterForBusiness(platform: string, business: BusinessRow): PlatformAdapter | null {
   if (platform === "telegram") {
     if (!business.telegram_bot_token) return null;
@@ -367,12 +344,7 @@ export interface ConversationSummary {
   updated_at: string | null;
 }
 
-/**
- * The omnichannel inbox listing: every conversation for a business across every
- * platform, bot-handled or escalated, with a last-message preview — what the
- * dashboard's inbox view is built from (vs. the agent-queue endpoints, which only
- * show escalated chats).
- */
+/** Every conversation for a business across all platforms, with a last-message preview. */
 export async function listConversations(business_id: string): Promise<ConversationSummary[]> {
   const messengers = await db
     .select()

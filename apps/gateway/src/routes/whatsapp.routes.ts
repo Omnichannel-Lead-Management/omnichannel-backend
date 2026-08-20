@@ -95,11 +95,6 @@ async function sendWhatsAppTapConfirmationAsync(
 
 export const whatsappRoutes = new Elysia({ prefix: "/webhook" })
   .use(correlationIdMiddleware)
-  /**
-   * GET /webhook/whatsapp
-   *
-   * Meta webhook verification endpoint
-   */
   .get(
     "/whatsapp",
     (context) => {
@@ -140,11 +135,6 @@ export const whatsappRoutes = new Elysia({ prefix: "/webhook" })
     }
   )
 
-  /**
-   * POST /webhook/whatsapp
-   *
-   * Receives incoming WhatsApp Cloud API events.
-   */
   .post(
     "/whatsapp",
     async (context) => {

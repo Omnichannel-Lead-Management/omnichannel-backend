@@ -1,20 +1,6 @@
 import type { IncomingMessage, PlatformAdapter, PlatformCapabilities } from "./PlatformAdapter";
 import { CORRELATION_ID_HEADER, extractRequestId, generateCorrelationId } from "../middleware/correlationId";
 
-/**
- * EvolutionAdapter
- *
- * Sends/receives WhatsApp messages via a self-hosted Evolution API instance
- * (Baileys/WhatsApp-Web protocol — see /evolution-api at the repo root).
- *
- * Unlike TelegramAdapter/WhatsAppAdapter (Meta Cloud API), this adapter is always
- * constructed per-business: one Evolution "instance" == one vendor's WhatsApp number.
- *
- * NOTE: sendInteractive is deliberately NOT implemented. Baileys' button/list
- * messages are unreliable on current WhatsApp client versions (WhatsApp has been
- * restricting rich interactive messages to verified Business API senders) — the
- * orchestrator already falls back to plain text when sendInteractive is absent.
- */
 export class EvolutionAdapter implements PlatformAdapter {
   readonly name = "whatsapp";
 
@@ -39,13 +25,7 @@ export class EvolutionAdapter implements PlatformAdapter {
     return messenger_id.replace(/^wa_/, "");
   }
 
-  /**
-   * Fetch the bytes of an inbound media message.
-   *
-   * Evolution stores the decrypted media and hands it back as base64 keyed by the
-   * WhatsApp message id — there is no direct file URL to fetch, unlike Telegram.
-   * Returns null on any failure; callers must still answer the customer.
-   */
+  /** Fetch the bytes of an inbound media message. */
   async downloadMedia(
     messageId: string,
     requestId?: string
@@ -203,11 +183,7 @@ function extractJidNumber(jid: string): string {
   return jid.replace(/@.*/, "").replace(/\D/g, "");
 }
 
-/**
- * Parse an Evolution API webhook event into the standard IncomingMessage shape.
- * Returns null for anything that isn't a processable direct-chat text/media message
- * (group messages, status/delivery-ack-only events, self-sent echoes, etc. are skipped).
- */
+/** Parse an Evolution API webhook event into the standard IncomingMessage shape. */
 export function formatEvolutionWebhook(payload: unknown): Record<string, unknown> | null {
   if (!isRecord(payload)) return null;
 
@@ -220,15 +196,12 @@ export function formatEvolutionWebhook(payload: unknown): Record<string, unknown
   const key = isRecord(data.key) ? data.key : null;
   if (!key) return null;
 
-  // Skip messages the connected account sent itself (already visible in the vendor's own app).
   if (key.fromMe === true) return null;
 
-  // Prefer the phone-number JID when WhatsApp's newer LID addressing is in play.
   const remoteJidAlt = typeof key.remoteJidAlt === "string" ? key.remoteJidAlt : "";
   const remoteJid = typeof key.remoteJid === "string" ? key.remoteJid : "";
   const resolvedJid = remoteJidAlt.endsWith("@s.whatsapp.net") ? remoteJidAlt : remoteJid;
 
-  // Only handle direct 1:1 chats — skip group messages (@g.us), broadcast lists, etc.
   if (!resolvedJid.endsWith("@s.whatsapp.net")) return null;
 
   const phone = extractJidNumber(resolvedJid);
@@ -257,7 +230,6 @@ export function formatEvolutionWebhook(payload: unknown): Record<string, unknown
   const messageId = typeof key.id === "string" ? key.id : "";
   const timestamp = typeof data.messageTimestamp === "number" ? data.messageTimestamp : Date.now() / 1000;
 
-  // Carried so the route handler can fetch the bytes and resolve them to text.
   const mediaKind = isRecord(message.imageMessage)
     ? "photo"
     : isRecord(message.audioMessage)

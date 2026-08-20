@@ -1,6 +1,5 @@
 import { describe, expect, test, beforeAll } from "bun:test";
 
-// Configure an isolated in-memory DB BEFORE importing modules that open it.
 process.env.NODE_ENV = "test";
 process.env.DATABASE_PATH = ":memory:";
 process.env.AGENT_POOL = "agentX,agentY";
@@ -26,7 +25,7 @@ describe("canTransition", () => {
     expect(canTransition("new", "contacted")).toBe(true);
     expect(canTransition("contacted", "converted")).toBe(true);
     expect(canTransition("qualified", "lost")).toBe(true);
-    expect(canTransition("new", "new")).toBe(true); // idempotent
+    expect(canTransition("new", "new")).toBe(true);
   });
   test("rejects backward / terminal moves", () => {
     expect(canTransition("contacted", "new")).toBe(false);
@@ -45,7 +44,7 @@ describe("createLead + activity log", () => {
       service_interest: "premium package"
     });
     expect(lead.status).toBe("new");
-    expect(lead.score).toBe(50); // chatbot 30 + premium 20
+    expect(lead.score).toBe(50);
     const acts = getActivities(lead.id, "biz_t1");
     expect(acts.some((a) => a.activity_type === "lead_created")).toBe(true);
   });
@@ -117,7 +116,7 @@ describe("upsertLeadFromMessage", () => {
       platform: "telegram",
       message: "any discounts?"
     });
-    expect(second.id).toBe(first.id); // same lead reused
+    expect(second.id).toBe(first.id);
     const acts = getActivities(first.id, "biz_c");
     expect(acts.some((a) => a.activity_type === "note_added")).toBe(true);
   });
@@ -129,6 +128,6 @@ describe("pickAgent", () => {
     const b = pickAgent("biz_rr");
     const c = pickAgent("biz_rr");
     expect([a, b]).toEqual(["agentX", "agentY"]);
-    expect(c).toBe("agentX"); // wraps around
+    expect(c).toBe("agentX");
   });
 });

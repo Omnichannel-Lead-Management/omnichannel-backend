@@ -1,10 +1,5 @@
 import type { Lead } from "../db/schema";
 
-/**
- * Best-effort notification hook (task L7).
- * Fire-and-forget with a timeout; NEVER throws. If the Notification service is
- * a stub or down, a lead must still be created. Skipped under NODE_ENV=test.
- */
 const NOTIFICATION_SERVICE_URL =
   process.env.NOTIFICATION_SERVICE_URL ?? "http://localhost:3004";
 const TIMEOUT_MS = 4000;

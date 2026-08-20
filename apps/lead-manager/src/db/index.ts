@@ -5,11 +5,8 @@ import { mkdirSync } from "node:fs";
 import { dirname } from "node:path";
 import * as schema from "./schema";
 
-// Database path from environment or a local default.
 const dbPath = process.env.DATABASE_PATH || "./sqlite/leads.db";
 
-// Ensure the parent directory exists so bun:sqlite can create the file.
-// (Use fs.mkdirSync — do NOT shell out to `rm`; that breaks on Windows.)
 if (dbPath !== ":memory:") {
   mkdirSync(dirname(dbPath), { recursive: true });
 }
@@ -20,10 +17,7 @@ sqlite.exec("PRAGMA journal_mode = WAL");
 
 export const db = drizzle(sqlite, { schema });
 
-/**
- * Create tables + indexes if they don't exist. Idempotent — safe to run on
- * every startup (task L1).
- */
+/** Create tables + indexes if they don't exist. */
 export async function initDatabase(): Promise<void> {
   console.log("🔧 Initializing leads database...");
 

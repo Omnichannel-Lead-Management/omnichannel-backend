@@ -6,10 +6,6 @@ import { scoreLead } from "./scoring";
 import { publish } from "./events";
 import { notifyLeadEvent } from "./notify";
 
-/**
- * Allowed status transitions (task L4). Forward-only lifecycle plus `lost`
- * reachable from any active state. `converted`/`lost` are terminal.
- */
 const TRANSITIONS: Record<LeadStatus, LeadStatus[]> = {
   new: ["contacted", "qualified", "lost"],
   contacted: ["qualified", "converted", "lost"],
@@ -19,11 +15,10 @@ const TRANSITIONS: Record<LeadStatus, LeadStatus[]> = {
 };
 
 export function canTransition(from: LeadStatus, to: LeadStatus): boolean {
-  if (from === to) return true; // idempotent no-op
+  if (from === to) return true;
   return TRANSITIONS[from].includes(to);
 }
 
-// ---- Agent assignment (task L6) ------------------------------------------
 const AGENT_POOL = (process.env.AGENT_POOL ?? "agent_1,agent_2,agent_3")
   .split(",")
   .map((s) => s.trim())
@@ -38,7 +33,6 @@ export function pickAgent(businessId: string): string | null {
   return AGENT_POOL[i % AGENT_POOL.length] ?? null;
 }
 
-// ---- helpers -------------------------------------------------------------
 const clampScore = (n: number) => Math.max(0, Math.min(100, Math.round(n)));
 const serializeTags = (tags?: string[] | null): string | null =>
   tags && tags.length > 0 ? JSON.stringify(tags) : null;
@@ -64,7 +58,6 @@ function logActivity(leadId: string, businessId: string, a: ActivityInput): void
     .run();
 }
 
-// ---- reads (L8: every query filters by business_id) ----------------------
 export function getLead(id: string, businessId: string): Lead | undefined {
   return db
     .select()
@@ -109,7 +102,6 @@ export function findLeadByMessenger(businessId: string, messengerId: string): Le
     .get();
 }
 
-// ---- create --------------------------------------------------------------
 export interface CreateLeadInput {
   business_id: string;
   messenger_id: string;
@@ -183,7 +175,6 @@ export function createLead(input: CreateLeadInput): Lead {
   return lead;
 }
 
-// ---- update --------------------------------------------------------------
 export interface UpdateLeadInput {
   status?: LeadStatus;
   score?: number;
@@ -279,11 +270,7 @@ export function updateLead(
   return { ok: true, lead: updated };
 }
 
-/**
- * Upsert a lead from an inbound routing `/chat` message (lead_qualification
- * intent). Creates a lead if the messenger has none, otherwise records the
- * message as a note.
- */
+/** Upsert a lead from an inbound routing `/chat` message (lead_qualification intent). */
 export function upsertLeadFromMessage(params: {
   business_id: string;
   messenger_id: string;
