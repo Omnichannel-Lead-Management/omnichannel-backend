@@ -1,0 +1,45 @@
+# Dependencies — the image installs its own. Copying the workspace's symlinked
+# node_modules breaks the build ("cannot replace to directory ... with file").
+node_modules/
+bun.lockb
+
+# Environment
+.env
+.env.*
+!.env.example
+
+# Database
+sqlite/
+data/
+*.db
+*.db-journal
+
+# Logs
+logs/
+*.log
+
+# Git
+.git/
+.gitignore
+
+# Documentation
+README.md
+docs/
+BUILD_GUIDE.md
+
+# IDE
+.vscode/
+.idea/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Build artifacts
+dist/
+build/
+drizzle/
+
+# Testing
+*.test.ts
+*.spec.ts
