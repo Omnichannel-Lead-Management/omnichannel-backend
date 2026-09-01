@@ -1,4 +1,4 @@
 export {
-  TemplatedEmailDeliveryService,
+  TemplatedEmailService,
   type SendTemplatedEmailInput
 } from "./templated-email-delivery-service";

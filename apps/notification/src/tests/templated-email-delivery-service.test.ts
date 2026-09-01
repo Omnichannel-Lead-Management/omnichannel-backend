@@ -5,9 +5,9 @@ import type {
   EmailProvider
 } from "../email-provider";
 import {
-  TemplatedEmailDeliveryService,
+  TemplatedEmailService,
   type SendTemplatedEmailInput
-} from "../email/services/templated-email-delivery-service";
+} from "../email/services";
 
 class FakeEmailProvider implements EmailProvider {
   readonly messages: EmailMessage[] = [];
@@ -28,7 +28,7 @@ const successResult: EmailDeliveryResult = {
 describe("templated email delivery service", () => {
   test("renders new-lead data and sends the expected provider message once", async () => {
     const provider = new FakeEmailProvider(successResult);
-    const service = new TemplatedEmailDeliveryService(provider);
+    const service = new TemplatedEmailService(provider);
 
     await service.send({
       recipient_email: "owner@example.com",
@@ -67,7 +67,7 @@ describe("templated email delivery service", () => {
 
   test("renders appointment data and forwards recipient, subject, text, and HTML", async () => {
     const provider = new FakeEmailProvider(successResult);
-    const service = new TemplatedEmailDeliveryService(provider);
+    const service = new TemplatedEmailService(provider);
 
     await service.send({
       recipient_email: "appointments@example.com",
@@ -95,7 +95,7 @@ describe("templated email delivery service", () => {
 
   test("returns the provider success result unchanged", async () => {
     const provider = new FakeEmailProvider(successResult);
-    const service = new TemplatedEmailDeliveryService(provider);
+    const service = new TemplatedEmailService(provider);
     const result = await service.send({
       recipient_email: "owner@example.com",
       template: "new_lead",
@@ -111,7 +111,7 @@ describe("templated email delivery service", () => {
       error: { code: "SMTP_TIMEOUT", message: "Email delivery timed out" }
     };
     const provider = new FakeEmailProvider(failureResult);
-    const service = new TemplatedEmailDeliveryService(provider);
+    const service = new TemplatedEmailService(provider);
     const result = await service.send({
       recipient_email: "owner@example.com",
       template: "new_lead",
@@ -124,7 +124,7 @@ describe("templated email delivery service", () => {
 
   test("preserves escaped template HTML", async () => {
     const provider = new FakeEmailProvider(successResult);
-    const service = new TemplatedEmailDeliveryService(provider);
+    const service = new TemplatedEmailService(provider);
     const script = `<script>alert("x")</script>`;
 
     await service.send({
@@ -141,7 +141,7 @@ describe("templated email delivery service", () => {
 
   test("does not mutate its input", async () => {
     const provider = new FakeEmailProvider(successResult);
-    const service = new TemplatedEmailDeliveryService(provider);
+    const service = new TemplatedEmailService(provider);
     const input: SendTemplatedEmailInput = {
       recipient_email: "owner@example.com",
       template: "new_lead",
@@ -158,5 +158,7 @@ describe("templated email delivery service", () => {
     await service.send(input);
 
     expect(input).toEqual(before);
+    expect(provider.messages[0]?.text).not.toContain("Service interest:");
+    expect(provider.messages[0]?.html).not.toContain("null");
   });
 });

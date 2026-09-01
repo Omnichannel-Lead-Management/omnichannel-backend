@@ -8,7 +8,7 @@ export type SendTemplatedEmailInput = EmailTemplateInput & {
   recipient_email: string;
 };
 
-export class TemplatedEmailDeliveryService {
+export class TemplatedEmailService {
   constructor(private readonly emailProvider: EmailProvider) {}
 
   async send(input: SendTemplatedEmailInput): Promise<EmailDeliveryResult> {
