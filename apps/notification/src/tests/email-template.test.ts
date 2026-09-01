@@ -64,6 +64,24 @@ describe("email templates", () => {
     expect(rendered.html).not.toContain("undefined");
   });
 
+  test("handles null optional new-lead values without placeholder content", () => {
+    const rendered = renderEmailTemplate({
+      template: "new_lead",
+      data: {
+        lead_id: "lead_457",
+        business_name: "Pathirana Salon",
+        service_interest: null,
+        platform: null,
+        score: null
+      }
+    });
+
+    expect(rendered.text).not.toContain("Service interest:");
+    expect(rendered.text).not.toContain("Platform:");
+    expect(rendered.text).not.toContain("Score:");
+    expect(rendered.html).not.toContain("null");
+  });
+
   test("escapes HTML special characters in every dynamic value", () => {
     const rendered = renderEmailTemplate({
       template: "appointment_confirmed",

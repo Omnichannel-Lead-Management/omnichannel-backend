@@ -1,9 +1,9 @@
 export interface NewLeadTemplateData {
   lead_id: string;
   business_name: string;
-  service_interest?: string;
-  platform?: string;
-  score?: number;
+  service_interest?: string | null;
+  platform?: string | null;
+  score?: number | null;
 }
 
 export interface AppointmentConfirmedTemplateData {
@@ -48,9 +48,9 @@ function renderNewLead(data: NewLeadTemplateData): RenderedEmail {
     ["Lead ID", data.lead_id]
   ];
 
-  if (data.service_interest !== undefined) details.push(["Service interest", data.service_interest]);
-  if (data.platform !== undefined) details.push(["Platform", data.platform]);
-  if (data.score !== undefined) details.push(["Score", data.score]);
+  if (data.service_interest != null) details.push(["Service interest", data.service_interest]);
+  if (data.platform != null) details.push(["Platform", data.platform]);
+  if (data.score != null) details.push(["Score", data.score]);
 
   return {
     subject: "New lead received",
