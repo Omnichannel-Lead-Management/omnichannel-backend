@@ -18,5 +18,11 @@
     "test": "bun test apps/gateway apps/routing",
     "test:unit": "bun test apps/gateway/src apps/routing/src --test-name-pattern 'unit'",
     "test:integration": "bun test apps/routing/src/server.integration.test.ts"
+  },
+  "dependencies": {
+    "nodemailer": "^9.1.1"
+  },
+  "devDependencies": {
+    "@types/nodemailer": "^8.0.1"
   }
 }
