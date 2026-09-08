@@ -120,8 +120,7 @@ services:
       start_period: 20s
 
   # Stores the lead events Lead Manager posts here and serves them back as the
-  # dashboard's in-app notification centre. Email delivery is still a stub — the
-  # POST /api/notifications/email response reports email_sent: false.
+  # dashboard's in-app notification centre. Templated email uses SMTP when enabled.
   notification:
     build: ../apps/notification
     restart: unless-stopped
@@ -162,6 +161,7 @@ services:
       PORT: 3005
       NODE_ENV: production
       DATABASE_PATH: /data/appointments.db
+      NOTIFICATION_SERVICE_URL: http://notification:3004
       # Gemini pulls the date/time/service out of the customer's message.
       GOOGLE_CLOUD_PROJECT: ${GOOGLE_CLOUD_PROJECT:-}
       GOOGLE_CLOUD_LOCATION: ${GOOGLE_CLOUD_LOCATION:-us-central1}

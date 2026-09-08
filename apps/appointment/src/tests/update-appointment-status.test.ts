@@ -28,7 +28,7 @@ describe("PATCH /api/appointments/:id/status", () => {
   beforeEach(() => {
     db = createDatabase(":memory:");
     initializeDatabase(db);
-    app = createApp(db);
+    app = createApp(db, { getBusinessProfile: async () => null, notificationClient: { sendEmail: async () => {} }, diagnostic: () => {} });
   });
 
   afterEach(() => {
