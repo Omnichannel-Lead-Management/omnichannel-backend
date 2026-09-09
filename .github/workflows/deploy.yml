@@ -25,7 +25,7 @@ jobs:
         run: bun install
 
       - name: Unit tests
-        run: bun test apps/gateway/src/middleware apps/gateway/src/services apps/gateway/src/routes apps/routing/src/circuitBreaker.test.ts apps/routing/src/agents apps/appointment apps/lead-manager/src
+        run: bun test apps/gateway/src/middleware apps/gateway/src/services apps/gateway/src/routes apps/routing/src/circuitBreaker.test.ts apps/routing/src/agents apps/appointment apps/lead-manager/src apps/notification
 
       - name: Integration tests
         run: bun test apps/routing/src/server.integration.test.ts
