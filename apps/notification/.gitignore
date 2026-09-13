@@ -3,3 +3,5 @@
 node_modules/
 dist/
 .DS_Store
+/appointment-notification-interview-report.md
+/routing-appointment-llm-report.md
