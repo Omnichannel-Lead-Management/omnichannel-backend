@@ -15,3 +15,7 @@ bun install
 cp .env.example .env
 bun run dev
 ```
+
+Appointment emails are triggered on successful pending → confirmed transitions,
+not booking creation, and go to the business owner/staff mailbox. See the
+[appointment integration setup](../appointment/README.md#appointment-confirmation-email).

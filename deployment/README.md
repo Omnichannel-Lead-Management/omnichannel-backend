@@ -144,3 +144,7 @@ real `POSTGRES_PASSWORD` and `AUTHENTICATION_API_KEY`, then set the *same* key a
 
 Note it speaks the unofficial WhatsApp Web protocol (Baileys), which can get numbers
 banned — fine for a demo, a real risk to disclose to a vendor relying on their number.
+
+Appointment confirmation email uses the Compose Gateway and Notification Service
+URLs. Configure the business profile owner email and enable SMTP delivery; see
+[appointment email setup and delivery limitations](../apps/appointment/README.md#appointment-confirmation-email).

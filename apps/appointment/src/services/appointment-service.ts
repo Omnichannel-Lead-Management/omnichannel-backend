@@ -71,7 +71,8 @@ const UPDATE_APPOINTMENT_STATUS_SQL = `
   SET
     status = ?,
     updated_at = ?
-  WHERE id = ?
+  WHERE id = ? AND business_id = ? AND status = ?
+  RETURNING *
 `;
 
 const APPOINTMENT_CONFLICT_SQL = `
@@ -331,20 +332,14 @@ export function updateAppointmentStatus(
 
   const updatedAt = new Date().toISOString();
 
-  db.query(UPDATE_APPOINTMENT_STATUS_SQL).run(
-    status,
-    updatedAt,
-    appointmentId
-  );
+  // Compare-and-set: a competing confirmation cannot claim the same transition.
+  const row = db.query<AppointmentRow, [string, string, string, string, string]>(
+    UPDATE_APPOINTMENT_STATUS_SQL
+  ).get(status, updatedAt, appointmentId, currentAppointment.businessId, currentAppointment.status);
 
-  return {
-    result: "updated",
-    appointment: {
-      ...currentAppointment,
-      status,
-      updatedAt,
-    },
-  };
+  if (!row) return { result: "invalid_transition" };
+
+  return { result: "updated", appointment: mapAppointmentRow(row) };
 }
 
 function mapAppointmentRow(row: AppointmentRow): Appointment {
