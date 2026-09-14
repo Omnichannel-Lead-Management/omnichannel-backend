@@ -1,4 +1,4 @@
-import { describe, expect, test, beforeAll } from "bun:test";
+import { describe, expect, test, beforeAll, spyOn } from "bun:test";
 
 process.env.NODE_ENV = "test";
 process.env.DATABASE_PATH = ":memory:";
@@ -18,6 +18,46 @@ const {
 
 beforeAll(async () => {
   await initDatabase();
+});
+
+test("lead creation and chat succeed when Gateway and Notification are unreachable", async () => {
+  const { chatRoutes } = await import("../routes/chat.routes");
+  const originalFetch = globalThis.fetch;
+  const originalMode = process.env.NODE_ENV;
+  const originalEnabled = process.env.NOTIFICATIONS_ENABLED;
+  const warn = spyOn(console, "warn").mockImplementation(() => {});
+  let notificationCalls = 0;
+  let finish!: () => void;
+  const dispatched = new Promise<void>(resolve => { finish = resolve; });
+  process.env.NODE_ENV = "development";
+  delete process.env.NOTIFICATIONS_ENABLED;
+  globalThis.fetch = (async (url: string | URL | Request): Promise<Response> => {
+    if (String(url).endsWith("/api/notifications/email")) {
+      notificationCalls++;
+      if (notificationCalls === 3) finish();
+    }
+    throw new Error("service unavailable");
+  }) as typeof fetch;
+  try {
+    const lead = createLead({ business_id: "biz_failure", messenger_id: "direct", platform: "web", source: "web" });
+    expect(getLead(lead.id, "biz_failure")?.id).toBe(lead.id);
+    const response = await chatRoutes.handle(new Request("http://localhost/chat", {
+      method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ business_id: "biz_failure", messenger_id: "chat", message: "Please help" })
+    }));
+    expect(response.status).toBe(200);
+    const body = await response.json();
+    expect(body.success).toBe(true);
+    expect(getLead(body.leadId, "biz_failure")?.id).toBe(body.leadId);
+    await dispatched;
+    expect(notificationCalls).toBe(3); // Direct creation, chat creation, chat escalation.
+  } finally {
+    globalThis.fetch = originalFetch;
+    if (originalMode === undefined) delete process.env.NODE_ENV; else process.env.NODE_ENV = originalMode;
+    if (originalEnabled === undefined) delete process.env.NOTIFICATIONS_ENABLED;
+    else process.env.NOTIFICATIONS_ENABLED = originalEnabled;
+    warn.mockRestore();
+  }
 });
 
 describe("canTransition", () => {

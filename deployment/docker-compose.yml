@@ -98,6 +98,7 @@ services:
       NODE_ENV: production
       DATABASE_PATH: /data/leads.db
       NOTIFICATION_SERVICE_URL: http://notification:3004
+      GATEWAY_SERVICE_URL: http://gateway:3000
       # Routing's /chat body carries no business_id yet, so leads created from
       # the lead_qualification intent land on this tenant. Keep it aligned with
       # the business the dashboard is built against.
