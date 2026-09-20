@@ -21,6 +21,7 @@ function toPublicBusiness(business: Awaited<ReturnType<typeof getBusinessById>>)
     name: business.name,
     sector: business.sector,
     owner_email: business.owner_email,
+    owner_name: business.owner_name,
     chatbot_enabled: Boolean(business.chatbot_enabled),
     timezone: business.timezone,
     contact_phone: business.contact_phone,
@@ -53,7 +54,8 @@ export const businessesRoutes = new Elysia({ prefix: "/api/businesses" })
       body: t.Object({
         name: t.String({ minLength: 1 }),
         sector: t.String({ minLength: 1 }),
-        owner_email: t.Optional(t.String())
+        owner_email: t.Optional(t.String()),
+        owner_name: t.Optional(t.String({ maxLength: 120 }))
       }),
       detail: { summary: "Register a new business (vendor/tenant)", tags: ["Businesses"] }
     }
@@ -95,6 +97,7 @@ export const businessesRoutes = new Elysia({ prefix: "/api/businesses" })
         name: t.Optional(t.String({ minLength: 1, maxLength: 160 })),
         sector: t.Optional(t.String({ minLength: 1, maxLength: 80 })),
         owner_email: t.Optional(t.Nullable(t.String({ maxLength: 320 }))),
+        owner_name: t.Optional(t.Nullable(t.String({ maxLength: 120 }))),
         timezone: t.Optional(t.Nullable(t.String({ maxLength: 64 }))),
         contact_phone: t.Optional(t.Nullable(t.String({ maxLength: 40 }))),
         address: t.Optional(t.Nullable(t.String({ maxLength: 500 }))),

@@ -33,6 +33,7 @@ export async function initDatabase() {
       name TEXT NOT NULL,
       sector TEXT NOT NULL,
       owner_email TEXT,
+      owner_name TEXT,
       chatbot_enabled INTEGER DEFAULT 1,
       timezone TEXT,
       contact_phone TEXT,
@@ -99,6 +100,7 @@ export async function initDatabase() {
     )
   `);
 
+  await db.execute(sql`ALTER TABLE businesses ADD COLUMN IF NOT EXISTS owner_name TEXT`);
   await db.execute(sql`ALTER TABLE businesses ADD COLUMN IF NOT EXISTS timezone TEXT`);
   await db.execute(sql`ALTER TABLE businesses ADD COLUMN IF NOT EXISTS contact_phone TEXT`);
   await db.execute(sql`ALTER TABLE businesses ADD COLUMN IF NOT EXISTS address TEXT`);

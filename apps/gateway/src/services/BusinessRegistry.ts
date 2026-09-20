@@ -27,6 +27,7 @@ export async function createBusiness(input: {
   name: string;
   sector: string;
   owner_email?: string;
+  owner_name?: string;
 }): Promise<BusinessRow> {
   const id = generateBusinessId();
 
@@ -34,7 +35,8 @@ export async function createBusiness(input: {
     id,
     name: input.name,
     sector: input.sector,
-    owner_email: input.owner_email
+    owner_email: input.owner_email,
+    owner_name: input.owner_name?.trim() || null
   });
 
   const business = await getBusinessById(id);
@@ -54,6 +56,7 @@ export interface BusinessProfilePatch {
   name?: string;
   sector?: string;
   owner_email?: string | null;
+  owner_name?: string | null;
   timezone?: string | null;
   contact_phone?: string | null;
   address?: string | null;
@@ -93,6 +96,9 @@ export async function updateBusiness(
 
   const owner_email = optionalText(patch.owner_email);
   if (owner_email !== undefined) changes.owner_email = owner_email;
+
+  const owner_name = optionalText(patch.owner_name);
+  if (owner_name !== undefined) changes.owner_name = owner_name;
 
   const timezone = optionalText(patch.timezone);
   if (timezone !== undefined) changes.timezone = timezone;
