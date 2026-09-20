@@ -263,6 +263,12 @@ services:
         VITE_BUSINESS_EMAIL: ${DASHBOARD_BUSINESS_EMAIL:-}
         VITE_AGENT_ESCALATION_QUEUE_ENABLED: ${DASHBOARD_AGENT_ESCALATION_QUEUE_ENABLED:-true}
         VITE_BUSINESS_PROFILE_UPDATE_ENABLED: ${DASHBOARD_BUSINESS_PROFILE_UPDATE_ENABLED:-true}
+        VITE_ANALYTICS_ENABLED: ${DASHBOARD_ANALYTICS_ENABLED:-true}
+        VITE_NOTIFICATION_CENTER_ENABLED: ${DASHBOARD_NOTIFICATION_CENTER_ENABLED:-true}
+        VITE_WEB_CHAT_ENABLED: ${DASHBOARD_WEB_CHAT_ENABLED:-true}
+        # Off until the gateway has POCKETBASE_URL: without storage every
+        # attachment upload answers 503.
+        VITE_IMAGE_ATTACHMENTS_ENABLED: ${DASHBOARD_IMAGE_ATTACHMENTS_ENABLED:-false}
     restart: unless-stopped
     # Keep direct port for debugging; public traffic should use edge :80
     ports:

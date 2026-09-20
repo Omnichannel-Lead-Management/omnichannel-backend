@@ -20,7 +20,8 @@ this one.
 | `edge` | 80 / 443 | `nginx:alpine` | — |
 
 Public traffic goes through `edge` only; the per-service host ports are for
-debugging. `notification` is still a stub — it answers 200 and sends nothing.
+debugging. `notification` stores the in-app notification centre and sends
+confirmation email.
 
 ## Call graph
 
@@ -69,6 +70,10 @@ DASHBOARD_BUSINESS_NAME=
 DASHBOARD_BUSINESS_SECTOR=
 DASHBOARD_BUSINESS_EMAIL=
 DASHBOARD_BUSINESS_PROFILE_UPDATE_ENABLED=  # (true) owners edit their profile in Settings
+DASHBOARD_ANALYTICS_ENABLED=     # (true) full reporting from the gateway
+DASHBOARD_NOTIFICATION_CENTER_ENABLED=  # (true) the header bell
+DASHBOARD_WEB_CHAT_ENABLED=      # (true) the embedded web chat widget
+DASHBOARD_IMAGE_ATTACHMENTS_ENABLED=    # (false) needs POCKETBASE_URL on the gateway
 LEAD_INTEGRATION_ENABLED=        # (true) chatbot → lead-manager capture
 AGENT_POOL=                      # (agent_1,agent_2,agent_3) round-robin assignment
 BUSINESS_UTC_OFFSET_MINUTES=     # (0)
