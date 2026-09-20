@@ -68,6 +68,7 @@ DASHBOARD_BUSINESS_ID=           # also the lead-manager DEFAULT_BUSINESS_ID
 DASHBOARD_BUSINESS_NAME=
 DASHBOARD_BUSINESS_SECTOR=
 DASHBOARD_BUSINESS_EMAIL=
+DASHBOARD_BUSINESS_PROFILE_UPDATE_ENABLED=  # (true) owners edit their profile in Settings
 LEAD_INTEGRATION_ENABLED=        # (true) chatbot → lead-manager capture
 AGENT_POOL=                      # (agent_1,agent_2,agent_3) round-robin assignment
 BUSINESS_UTC_OFFSET_MINUTES=     # (0)
