@@ -26,6 +26,16 @@ export function primeBusinessHoursCache(businessId: string, hours: BusinessHours
 
 const TIME_RE = /^([01]\d|2[0-3]):([0-5]\d)$/;
 
+/**
+ * The gateway requires a credential on `/api/` routes. Sibling services have no
+ * user session, so they present the shared internal token instead.
+ */
+function internalAuthHeaders(): Record<string, string> {
+  const token = process.env.INTERNAL_SERVICE_TOKEN?.trim();
+  return token ? { "X-Internal-Token": token } : {};
+}
+
+
 /** Reject anything that is not the documented shape rather than half-trusting it. */
 function normalize(value: unknown): BusinessHours | null {
   if (!value || typeof value !== "object" || Array.isArray(value)) return null;
@@ -70,6 +80,7 @@ export async function getBusinessHours(businessId: string): Promise<BusinessHour
 
   try {
     const res = await fetch(`${GATEWAY_URL}/api/businesses/${encodeURIComponent(businessId)}`, {
+      headers: internalAuthHeaders(),
       signal: controller.signal
     });
     if (res.ok) {

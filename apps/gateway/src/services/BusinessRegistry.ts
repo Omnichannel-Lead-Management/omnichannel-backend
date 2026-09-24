@@ -1,4 +1,4 @@
-import { and, desc, eq } from "drizzle-orm";
+import { and, desc, eq, sql } from "drizzle-orm";
 import { db, schema } from "../db";
 import { TelegramAdapter } from "../platforms/TelegramAdapter";
 import { EvolutionAdapter } from "../platforms/EvolutionAdapter";
@@ -28,6 +28,7 @@ export async function createBusiness(input: {
   sector: string;
   owner_email?: string;
   owner_name?: string;
+  password_hash?: string;
 }): Promise<BusinessRow> {
   const id = generateBusinessId();
 
@@ -36,7 +37,8 @@ export async function createBusiness(input: {
     name: input.name,
     sector: input.sector,
     owner_email: input.owner_email,
-    owner_name: input.owner_name?.trim() || null
+    owner_name: input.owner_name?.trim() || null,
+    password_hash: input.password_hash ?? null
   });
 
   const business = await getBusinessById(id);
@@ -50,6 +52,31 @@ export async function getBusinessById(id: string): Promise<BusinessRow | undefin
     .from(schema.businesses)
     .where(eq(schema.businesses.id, id))
     .then((rows) => rows[0]);
+}
+
+/**
+ * Owner lookup for login. Emails are matched case-insensitively because owners
+ * type them by hand; the column itself keeps whatever casing was registered.
+ */
+export async function getBusinessByOwnerEmail(email: string): Promise<BusinessRow | undefined> {
+  const normalized = email.trim().toLowerCase();
+  if (!normalized) return undefined;
+
+  return await db
+    .select()
+    .from(schema.businesses)
+    .where(sql`lower(${schema.businesses.owner_email}) = ${normalized}`)
+    .then((rows) => rows[0]);
+}
+
+export async function setBusinessPassword(id: string, passwordHash: string): Promise<boolean> {
+  const updated = await db
+    .update(schema.businesses)
+    .set({ password_hash: passwordHash, updated_at: new Date().toISOString() })
+    .where(eq(schema.businesses.id, id))
+    .returning({ id: schema.businesses.id });
+
+  return updated.length > 0;
 }
 
 export interface BusinessProfilePatch {

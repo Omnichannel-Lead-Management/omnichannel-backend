@@ -106,6 +106,7 @@ export async function initDatabase() {
   await db.execute(sql`ALTER TABLE businesses ADD COLUMN IF NOT EXISTS address TEXT`);
   await db.execute(sql`ALTER TABLE businesses ADD COLUMN IF NOT EXISTS description TEXT`);
   await db.execute(sql`ALTER TABLE businesses ADD COLUMN IF NOT EXISTS business_hours TEXT`);
+  await db.execute(sql`ALTER TABLE businesses ADD COLUMN IF NOT EXISTS password_hash TEXT`);
 
   await db.execute(sql`ALTER TABLE messengers ADD COLUMN IF NOT EXISTS is_escalated INTEGER DEFAULT 0`);
   await db.execute(sql`ALTER TABLE messengers ADD COLUMN IF NOT EXISTS escalation_status TEXT DEFAULT 'none'`);

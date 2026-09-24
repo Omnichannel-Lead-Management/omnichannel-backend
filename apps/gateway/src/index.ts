@@ -18,6 +18,9 @@ import { appointmentsProxyRoutes } from "./routes/appointments.proxy.routes";
 import { chatbotProxyRoutes } from "./routes/chatbot.proxy.routes";
 import { notificationsProxyRoutes } from "./routes/notifications.proxy.routes";
 import { healthRoutes } from "./routes/health.routes";
+import { authRoutes } from "./routes/auth.routes";
+import { authorize } from "./middleware/requireAuth";
+import { sessionAuthService } from "./services/SessionAuth";
 import {
   describeAllowedCorsOrigins,
   getAllowedCorsOrigins,
@@ -38,6 +41,24 @@ async function init() {
   if (allowedCorsOrigins.length === 0) {
     console.warn(
       "⚠️  No CORS browser origins configured. Set CORS_ALLOWED_ORIGINS for production."
+    );
+  }
+
+  // Without a signing secret every `/api/` route answers 503 rather than
+  // falling open, so in production this is a startup failure, not a warning.
+  if (!sessionAuthService.configured) {
+    const message =
+      "AUTH_JWT_SECRET is not set — dashboard sessions cannot be issued or verified.";
+    if (NODE_ENV === "production") throw new Error(message);
+    console.warn(`⚠️  ${message}`);
+  } else {
+    console.log("🔐 Dashboard session authentication enabled");
+  }
+
+  if (!process.env.INTERNAL_SERVICE_TOKEN?.trim()) {
+    console.warn(
+      "⚠️  INTERNAL_SERVICE_TOKEN is not set — chatbot, lead-manager and appointment " +
+        "cannot read business profiles, so confirmation email will lose its recipient."
     );
   }
 
@@ -83,6 +104,8 @@ const app = new Elysia()
       upload_image: "POST /api/upload-image",
       agent_status: "GET /api/agents/status",
       businesses: "POST /api/businesses",
+      login: "POST /api/auth/login",
+      session: "GET /api/auth/me",
       telegram_webhook: "POST /webhook/telegram",
       telegram_webhook_multi_tenant: "POST /webhook/telegram/:business_id",
       whatsapp_webhook: "POST /webhook/whatsapp",
@@ -91,6 +114,18 @@ const app = new Elysia()
       agent_websocket: "WS /ws/agents"
     }
   }))
+  // onRequest runs before route matching, so this covers every route on the
+  // app — including those merged in by `.use()` below — without depending on
+  // Elysia's per-instance hook scoping. A security gate must not be able to
+  // miss a route because of where it was mounted.
+  .onRequest(async ({ request, set }) => {
+    const decision = await authorize(request);
+    if (decision.allow) return;
+
+    set.status = decision.status ?? 401;
+    return { success: false, error: decision.error ?? "Authentication required" };
+  })
+  .use(authRoutes)
   .use(messagingRoutes)
   .use(uploadRoutes)
   .use(agentsRoutes)

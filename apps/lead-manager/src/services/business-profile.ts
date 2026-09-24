@@ -6,6 +6,16 @@ export interface BusinessProfile {
 
 const EMAIL_ADDRESS = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 
+/**
+ * The gateway requires a credential on `/api/` routes. Sibling services have no
+ * user session, so they present the shared internal token instead.
+ */
+function internalAuthHeaders(): Record<string, string> {
+  const token = process.env.INTERNAL_SERVICE_TOKEN?.trim();
+  return token ? { "X-Internal-Token": token } : {};
+}
+
+
 /** Only return profiles suitable for email; any lookup failure preserves legacy alerts. */
 export async function getBusinessProfile(businessId: string): Promise<BusinessProfile | null> {
   const controller = new AbortController();
@@ -14,7 +24,11 @@ export async function getBusinessProfile(businessId: string): Promise<BusinessPr
     const baseUrl = process.env.GATEWAY_SERVICE_URL ?? "http://localhost:3000";
     const response = await fetch(
       `${baseUrl.replace(/\/$/, "")}/api/businesses/${encodeURIComponent(businessId)}`,
-      { method: "GET", headers: { Accept: "application/json" }, signal: controller.signal }
+      {
+        method: "GET",
+        headers: { Accept: "application/json", ...internalAuthHeaders() },
+        signal: controller.signal
+      }
     );
     if (!response.ok) return null;
     const payload: unknown = await response.json();

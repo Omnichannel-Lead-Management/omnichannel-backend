@@ -8,6 +8,7 @@ export const businesses = pgTable("businesses", {
   sector: text("sector").notNull(),
   owner_email: text("owner_email"),
   owner_name: text("owner_name"),
+  password_hash: text("password_hash"),
   chatbot_enabled: integer("chatbot_enabled").default(1),
 
   timezone: text("timezone"),

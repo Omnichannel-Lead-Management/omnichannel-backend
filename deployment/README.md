@@ -64,7 +64,16 @@ LLM_ROUTING_ENABLED=             # (true)
 TELEGRAM_BOT_TOKEN=
 PUBLIC_BASE_URL=                 # (https://cache.us.kg)
 CORS_ALLOWED_ORIGINS=            # (https://cache.us.kg,http://cache.us.kg)
-AGENT_AUTH_MODE=                 # (none)
+AGENT_AUTH_MODE=                 # (none) agent WebSocket handshake only
+AUTH_JWT_SECRET=                 # REQUIRED — signs dashboard sessions
+AUTH_SESSION_TTL_HOURS=          # (12)
+INTERNAL_SERVICE_TOKEN=          # REQUIRED — sibling services' credential
+NOTIFICATIONS_ENABLED=           # (false) email stays off until this is true
+SMTP_HOST=                       # required when NOTIFICATIONS_ENABLED=true
+SMTP_PORT=
+SMTP_USER=
+SMTP_PASS=
+SMTP_FROM=
 DASHBOARD_BUSINESS_ID=           # also the lead-manager DEFAULT_BUSINESS_ID
 DASHBOARD_BUSINESS_NAME=
 DASHBOARD_BUSINESS_SECTOR=
@@ -85,6 +94,45 @@ EDGE_CERT_DIR=                   # (./certs)
 > **Docker + Vertex AI:** containers need `GCE_METADATA_HOST=169.254.169.254` so
 > google-auth-library reaches the GCE metadata server by IP — Docker's resolver may
 > not answer `metadata.google.internal`.
+
+## Authentication
+
+`/api/` requires a dashboard session token. The exceptions are `POST /api/auth/login`,
+`POST /api/businesses` (self-service registration), `/api/health*`,
+`/api/messaging/health`, `/api/messaging/receive`, `/webhook/*` and `/ws/*`.
+
+Two credentials are involved, and both are **required** — generate each with
+`openssl rand -hex 32`:
+
+| Variable | Used by | Missing means |
+|---|---|---|
+| `AUTH_JWT_SECRET` | gateway, to sign owner sessions | gateway refuses to start in production |
+| `INTERNAL_SERVICE_TOKEN` | chatbot, lead-manager, appointment → gateway | business lookups 401, so confirmation email loses its recipient |
+
+`AGENT_AUTH_MODE` is unrelated: it guards only the agent WebSocket handshake.
+
+### Giving an existing tenant its first password
+
+Businesses registered before authentication existed have no password and cannot
+be signed into. Set one from the host:
+
+```bash
+cd ~/omnichannel/omnichannel-backend/deployment
+printf '%s' 'the-new-password' | docker compose --env-file .env exec -T gateway \
+  bun run scripts/set-business-password.ts <business-id-or-owner-email>
+```
+
+The owner then signs in at `/login` with their `owner_email` and that password.
+New tenants set their own password at `/register`.
+
+### Deploy order
+
+Turning this on is a breaking change: a dashboard built before this change sends
+no token and every request it makes answers 401. Deploy the **backend and the
+dashboard together**, and set both secrets in `.env` *before* the first deploy —
+they are separate repos with separate CI pipelines, so pushing only one leaves
+the site signed out until the other lands.
+
 
 ## Deploying
 
@@ -128,6 +176,12 @@ curl -s localhost:3003/health
 curl -s localhost:3004/health
 curl -s localhost:3005/health
 curl -s https://cache.us.kg/          # through Cloudflare + edge
+
+# /api/ now needs a session; health endpoints stay open.
+TOKEN=$(curl -s -X POST localhost:3000/api/auth/login \
+  -H 'Content-Type: application/json' \
+  -d '{"owner_email":"owner@example.com","password":"..."}' | jq -r .token)
+curl -s localhost:3000/api/businesses/<id> -H "Authorization: Bearer $TOKEN"
 ```
 
 ## Stop / reset

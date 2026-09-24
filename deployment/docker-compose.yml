@@ -72,6 +72,9 @@ services:
       # Reads the tenant's name/sector/description to give the FAQ matcher
       # business context. Best-effort: unreachable means no extra context.
       GATEWAY_URL: http://gateway:3000
+      # Gateway /api/ routes require a credential; sibling services have no
+      # user session and present this shared token instead.
+      INTERNAL_SERVICE_TOKEN: ${INTERNAL_SERVICE_TOKEN:-}
     volumes:
       - chatbot_data:/data
     healthcheck:
@@ -99,6 +102,7 @@ services:
       DATABASE_PATH: /data/leads.db
       NOTIFICATION_SERVICE_URL: http://notification:3004
       GATEWAY_SERVICE_URL: http://gateway:3000
+      INTERNAL_SERVICE_TOKEN: ${INTERNAL_SERVICE_TOKEN:-}
       # Routing's /chat body carries no business_id yet, so leads created from
       # the lead_qualification intent land on this tenant. Keep it aligned with
       # the business the dashboard is built against.
@@ -176,6 +180,7 @@ services:
       BUSINESS_OPEN_HOUR: ${BUSINESS_OPEN_HOUR:-9}
       BUSINESS_CLOSE_HOUR: ${BUSINESS_CLOSE_HOUR:-17}
       GATEWAY_URL: http://gateway:3000
+      INTERNAL_SERVICE_TOKEN: ${INTERNAL_SERVICE_TOKEN:-}
     volumes:
       - appointment_data:/data
     healthcheck:
@@ -224,6 +229,11 @@ services:
       PUBLIC_BASE_URL: ${PUBLIC_BASE_URL:-https://cache.us.kg}
       CORS_ALLOWED_ORIGINS: ${CORS_ALLOWED_ORIGINS:-https://cache.us.kg,http://cache.us.kg}
       AGENT_AUTH_MODE: ${AGENT_AUTH_MODE:-none}
+      # Dashboard sessions. Without AUTH_JWT_SECRET the gateway refuses to
+      # start in production rather than serving /api/ unauthenticated.
+      AUTH_JWT_SECRET: ${AUTH_JWT_SECRET:-}
+      AUTH_SESSION_TTL_HOURS: ${AUTH_SESSION_TTL_HOURS:-12}
+      INTERNAL_SERVICE_TOKEN: ${INTERNAL_SERVICE_TOKEN:-}
       # Self-hosted WhatsApp. The evolution-api container joins this network from
       # its own compose file (../evolution-api), so the name resolves once that
       # stack is up. Without EVOLUTION_API_KEY the WhatsApp connect endpoints

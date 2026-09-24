@@ -1,6 +1,15 @@
 import type { Appointment } from "../types/appointment";
 import { createNotificationClient, requestJson, type HttpFetch, type NotificationClient } from "./notification-client";
 
+/**
+ * The gateway requires a credential on `/api/` routes. Sibling services have no
+ * user session, so they present the shared internal token instead.
+ */
+function internalAuthHeaders(): Record<string, string> {
+  const token = process.env.INTERNAL_SERVICE_TOKEN?.trim();
+  return token ? { "X-Internal-Token": token } : {};
+}
+
 export interface BusinessEmailProfile {
   id: string;
   name: string;
@@ -11,7 +20,8 @@ export function createBusinessEmailProfileProvider(options: { url?: string; fetc
   return async (businessId: string): Promise<BusinessEmailProfile | null> => {
     const url = (options.url ?? process.env.GATEWAY_URL ?? "http://localhost:3000").replace(/\/$/, "");
     const body = await requestJson(options.fetcher ?? fetch,
-      `${url}/api/businesses/${encodeURIComponent(businessId)}`, options.timeoutMs ?? 4_000
+      `${url}/api/businesses/${encodeURIComponent(businessId)}`, options.timeoutMs ?? 4_000,
+      { headers: internalAuthHeaders() }
     ) as { business?: BusinessEmailProfile } | null;
     const profile = body?.business;
     if (!profile || profile.id !== businessId || typeof profile.name !== "string" || !profile.name.trim()) return null;
