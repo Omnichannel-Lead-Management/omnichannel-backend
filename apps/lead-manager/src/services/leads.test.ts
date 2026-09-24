@@ -160,6 +160,56 @@ describe("upsertLeadFromMessage", () => {
     const acts = getActivities(first.id, "biz_c");
     expect(acts.some((a) => a.activity_type === "note_added")).toBe(true);
   });
+
+  test("records what the customer asked for, premium keyword or not", () => {
+    const lead = upsertLeadFromMessage({
+      business_id: "biz_interest",
+      messenger_id: "cust_plain",
+      platform: "web",
+      message: "Can I get a quote for bridal makeup for five people in January?"
+    });
+
+    // Previously this was only populated when the text contained a premium
+    // keyword, so ordinary high-intent enquiries were stored blank.
+    expect(lead.service_interest).toBe(
+      "Can I get a quote for bridal makeup for five people in January?"
+    );
+  });
+
+  test("long messages are truncated to the stored interest length", () => {
+    const lead = upsertLeadFromMessage({
+      business_id: "biz_interest",
+      messenger_id: "cust_long",
+      platform: "web",
+      message: "x".repeat(200)
+    });
+
+    expect(lead.service_interest).toHaveLength(120);
+  });
+
+  test("\"full package\" counts as premium interest", () => {
+    const lead = upsertLeadFromMessage({
+      business_id: "biz_interest",
+      messenger_id: "cust_fullpackage",
+      platform: "web",
+      message: "I want the full package for my wedding"
+    });
+
+    // scoring.ts lists "full package" as a premium keyword, but the local copy
+    // this path used checked only four terms, so the rule never fired.
+    expect(lead.score).toBeGreaterThan(0);
+  });
+
+  test("a plain web enquiry still carries its interest text", () => {
+    const lead = upsertLeadFromMessage({
+      business_id: "biz_interest",
+      messenger_id: "cust_web",
+      platform: "web",
+      message: "do you do bridal hair?"
+    });
+
+    expect(lead.service_interest).toBe("do you do bridal hair?");
+  });
 });
 
 describe("pickAgent", () => {

@@ -2,7 +2,7 @@ import { and, desc, eq } from "drizzle-orm";
 import { db } from "../db";
 import { leads, leadActivities, type Lead, type LeadActivity } from "../db/schema";
 import type { LeadStatus, ScoreSignals } from "../types";
-import { scoreLead } from "./scoring";
+import { scoreLead, signalsFromMessage } from "./scoring";
 import { publish } from "./events";
 import { notifyLeadEvent } from "./notify";
 
@@ -291,19 +291,14 @@ export function upsertLeadFromMessage(params: {
     platform: params.platform,
     source: params.platform === "web" ? "web" : params.platform,
     notes: params.message,
-    ...scoreHintsFromText(params.message),
+    // What the customer actually asked for is the only thing an agent can
+    // triage on, so it is always recorded — not just when the text happens to
+    // contain a premium keyword, which left every other lead blank.
+    service_interest: params.message.slice(0, 120),
+    ...signalsFromMessage(params.message),
     autoAssign: true,
     performed_by: "system"
   });
-}
-
-function scoreHintsFromText(message: string): {
-  service_interest?: string;
-  premium_interest?: boolean;
-} {
-  const lower = message.toLowerCase();
-  const premium = ["premium", "vip", "deluxe", "gold"].some((k) => lower.includes(k));
-  return premium ? { premium_interest: true, service_interest: message.slice(0, 120) } : {};
 }
 
 /** Parse the stored tags JSON back into an array for API responses. */
