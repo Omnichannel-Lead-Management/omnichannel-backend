@@ -2,6 +2,7 @@ import { Elysia, t } from "elysia";
 import type { Lead } from "../db/schema";
 import {
   createLead,
+  findLeadByMessenger,
   getLead,
   getActivities,
   listLeads,
@@ -30,6 +31,15 @@ export const leadsRoutes = new Elysia({ prefix: "/api/leads" })
   .post(
     "/",
     ({ body, set }) => {
+      // A lead is a person, not a message. The chatbot now captures on every
+      // enquiry it answers, so without this one customer asking three
+      // questions would become three leads.
+      const existing = findLeadByMessenger(body.business_id, body.messenger_id);
+      if (existing) {
+        set.status = 200;
+        return { success: true, lead: toDto(existing), deduplicated: true };
+      }
+
       const lead = createLead(body);
       set.status = 201;
       return { success: true, lead: toDto(lead) };
