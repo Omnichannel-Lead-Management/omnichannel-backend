@@ -10,6 +10,14 @@ import { WebSocketRateLimiter } from "../services/WebSocketRateLimiter";
 interface WebSocketData {
   session_id?: string;
   request_id?: string;
+  /**
+   * Which tenant this widget belongs to, taken from `?business_id=` on the
+   * socket URL. Without it every web chat registered under biz_default, so the
+   * conversation never reached the owner's inbox and any lead it produced was
+   * filed against lead-manager's DEFAULT_BUSINESS_ID instead of the business
+   * the customer was actually talking to.
+   */
+  business_id?: string;
 }
 
 interface IncomingWebSocketMessage {
@@ -52,8 +60,15 @@ export const websocketRoutes = new Elysia()
     open(ws) {
       const session_id = generateWebSessionId();
       const request_id = generateCorrelationId();
+      const business_id =
+        typeof (ws.data as { query?: Record<string, string | undefined> }).query?.business_id ===
+        "string"
+          ? (ws.data as { query: Record<string, string> }).query.business_id.trim()
+          : "";
+
       (ws.data as WebSocketData).session_id = session_id;
       (ws.data as WebSocketData).request_id = request_id;
+      if (business_id) (ws.data as WebSocketData).business_id = business_id;
 
       const adapter = getPlatformAdapter("web") as WebAdapter;
       if (adapter) {
@@ -74,6 +89,7 @@ export const websocketRoutes = new Elysia()
     async message(ws, data) {
       try {
         let session_id = (ws.data as WebSocketData).session_id;
+        const businessId = (ws.data as WebSocketData).business_id ?? "";
         const request_id =
           (ws.data as WebSocketData).request_id ?? generateCorrelationId();
 
@@ -189,6 +205,7 @@ export const websocketRoutes = new Elysia()
           const result = await messageOrchestrator.processIncomingMessage({
             request_id,
             platform: "web",
+            ...(businessId ? { business_id: businessId } : {}),
             messenger_id: session_id,
             message: imageMessageText,
             image_url: imageUrl,
@@ -236,6 +253,7 @@ export const websocketRoutes = new Elysia()
         const result = await messageOrchestrator.processIncomingMessage({
           request_id,
           platform: "web",
+          ...(businessId ? { business_id: businessId } : {}),
           messenger_id: session_id,
           message: payload.message,
           first_name: payload.first_name,
