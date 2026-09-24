@@ -32,6 +32,10 @@ COPY --from=deps /app/node_modules ./node_modules
 
 # Copy application code
 COPY src ./src
+# Operational scripts, e.g. setting a business owner's first password. The
+# deployment README tells operators to run these with `docker compose exec`,
+# which only works if they are in the image.
+COPY scripts ./scripts
 COPY drizzle.config.ts ./
 COPY package.json ./
 
