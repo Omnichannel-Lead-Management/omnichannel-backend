@@ -1,16 +1,6 @@
 import { and, eq, gte, lte } from "drizzle-orm";
 import { db, schema } from "../db";
 
-/**
- * Tenant analytics.
- *
- * The gateway is the only service that can answer this: conversations and
- * escalations live in its own Postgres, leads live in lead-manager and
- * appointments in the appointment service. Each remote source is fetched
- * best-effort — one service being down degrades a section to zero rather than
- * failing the whole dashboard.
- */
-
 const LEAD_SERVICE_URL = (process.env.LEAD_SERVICE_URL ?? "http://localhost:3002").replace(/\/$/, "");
 const APPOINTMENT_SERVICE_URL = (
   process.env.APPOINTMENT_SERVICE_URL ?? "http://localhost:3005"
@@ -21,8 +11,8 @@ const DAY_MS = 24 * 60 * 60 * 1000;
 const MAX_RANGE_DAYS = 366;
 
 export interface AnalyticsRange {
-  from: string; // YYYY-MM-DD, inclusive
-  to: string; // YYYY-MM-DD, inclusive
+  from: string;
+  to: string;
   timezone: string;
 }
 
@@ -55,8 +45,6 @@ export function resolveRange(query: {
   const to = DATE_RE.test(query.to ?? "") ? (query.to as string) : today();
   const fromCandidate = DATE_RE.test(query.from ?? "") ? (query.from as string) : shiftDays(to, -29);
 
-  // A reversed range is a client bug; treat it as a single day rather than
-  // silently returning nothing.
   let from = fromCandidate > to ? to : fromCandidate;
   if (Date.parse(`${to}T00:00:00.000Z`) - Date.parse(`${from}T00:00:00.000Z`) > MAX_RANGE_DAYS * DAY_MS) {
     from = shiftDays(to, -(MAX_RANGE_DAYS - 1));
@@ -72,7 +60,6 @@ export function resolveRange(query: {
 function rangeBoundsIso(range: AnalyticsRange): { startIso: string; endIso: string } {
   return {
     startIso: `${range.from}T00:00:00.000Z`,
-    // Exclusive upper bound: the day after `to`.
     endIso: `${shiftDays(range.to, 1)}T00:00:00.000Z`
   };
 }
@@ -148,7 +135,6 @@ function inRange(range: AnalyticsRange, ms: number | null | undefined): boolean 
 export async function buildBusinessAnalytics(businessId: string, range: AnalyticsRange) {
   const { startIso, endIso } = rangeBoundsIso(range);
 
-  // ── Local: conversations + escalations ──
   const conversationRows = await db
     .select({
       platform: schema.messengers.platform,
@@ -165,7 +151,6 @@ export async function buildBusinessAnalytics(businessId: string, range: Analytic
       )
     );
 
-  // ── Remote: leads + appointments ──
   const [leadsResponse, appointmentsResponse] = await Promise.all([
     fetchJson<{ leads?: LeadRow[] }>(
       `${LEAD_SERVICE_URL}/api/leads?businessId=${encodeURIComponent(businessId)}`
@@ -218,7 +203,6 @@ export async function buildBusinessAnalytics(businessId: string, range: Analytic
     lead_statuses: tally(leads.map((lead) => lead.status)),
     appointment_statuses: tally(appointments.map((a) => a.status)),
     escalation_statuses: tally(escalations.map((row) => row.escalation_status)),
-    // Per-agent breakdown — the dashboard's agent view reads this.
     agents: tally(
       leads.map((lead) => (lead.assigned_agent_id ? lead.assigned_agent_id : "Unassigned")),
       "Unassigned"

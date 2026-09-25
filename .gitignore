@@ -5,3 +5,4 @@ dist/
 .DS_Store
 data/
 *.log
+/docs/testing_report_nofitication.md

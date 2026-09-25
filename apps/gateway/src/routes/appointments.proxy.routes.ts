@@ -1,13 +1,5 @@
 import { Elysia } from "elysia";
 
-/**
- * Thin proxy from the public origin to the Appointment service, for the same
- * reason as leads.routes.ts: the edge only exposes /api/ on this gateway, so
- * the dashboard cannot reach port 3005 directly.
- *
- * Named *.proxy.routes.ts because apps/appointment owns the real
- * appointments.ts — this file must not grow booking logic of its own.
- */
 const APPOINTMENT_SERVICE_URL =
   process.env.APPOINTMENT_SERVICE_URL ?? "http://localhost:3005";
 const TIMEOUT_MS = 8000;
@@ -43,7 +35,6 @@ async function forward(
 const json = { "Content-Type": "application/json" } as const;
 
 export const appointmentsProxyRoutes = new Elysia({ prefix: "/api/appointments" })
-  // Before "/:id" so "availability" is not read as an appointment id.
   .get("/availability", ({ query, set }) => {
     const params = new URLSearchParams();
     for (const [key, value] of Object.entries(query)) {

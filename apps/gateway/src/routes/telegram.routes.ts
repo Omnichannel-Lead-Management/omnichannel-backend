@@ -1,8 +1,3 @@
-/**
- * Telegram Webhook Routes
- *
- * Handles incoming Telegram bot webhooks
- */
 
 import { Elysia, t } from "elysia";
 import {
@@ -61,14 +56,9 @@ async function processTelegramMessageAsync(
   };
 
   try {
-    // Photos and voice notes are resolved to TEXT here, at the edge. Everything
-    // downstream (routing, chatbot, lead-manager, appointment) speaks plain text,
-    // so this is the only place that has to know media exists.
     if (mutableMessage._photo_file_id) {
       const fileData = await adapter.downloadFile(mutableMessage._photo_file_id, correlationId);
       if (fileData) {
-        // The tenant's sector shapes the description — a salon and a photographer
-        // want different things noticed in the same photo.
         let sector: string | undefined;
         if (typeof mutableMessage.business_id === "string") {
           try {
@@ -140,12 +130,6 @@ async function processTelegramMessageAsync(
 
 export const telegramRoutes = new Elysia({ prefix: "/webhook" })
   .use(correlationIdMiddleware)
-  /**
-   * POST /webhook/telegram
-   *
-   * Telegram webhook endpoint
-   * Telegram will send updates here when messages arrive
-   */
   .post(
     "/telegram",
     async (context) => {
@@ -238,11 +222,9 @@ export const telegramRoutes = new Elysia({ prefix: "/webhook" })
           return { ok: true };
         }
 
-        // Format Telegram update to standard format
         const formattedMessage = formatTelegramWebhook(body);
 
         if (!formattedMessage) {
-          // Not a supported message type, ignore
           logWithCorrelation(correlationId, "INCOMING_IGNORED", "platform=telegram unsupported payload");
           return { ok: true };
         }
@@ -277,23 +259,11 @@ export const telegramRoutes = new Elysia({ prefix: "/webhook" })
     }
   )
 
-  /**
-   * GET /webhook/telegram
-   *
-   * Health check for webhook
-   */
   .get("/telegram", () => ({
     status: "Telegram webhook is active",
     timestamp: new Date().toISOString()
   }))
 
-  /**
-   * POST /webhook/telegram/:business_id
-   *
-   * Multi-tenant Telegram webhook — each registered business gets its own bot
-   * and its own webhook path (see BusinessRegistry.connectTelegram). The secret
-   * token is validated against that business's own stored secret, not a global env var.
-   */
   .post(
     "/telegram/:business_id",
     async (context) => {

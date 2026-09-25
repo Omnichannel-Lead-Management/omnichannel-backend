@@ -1,8 +1,3 @@
-/**
- * WebSocket Routes
- *
- * Handles real-time web chat connections
- */
 
 import { Elysia } from "elysia";
 import { getPlatformAdapter } from "../platforms";
@@ -15,6 +10,14 @@ import { WebSocketRateLimiter } from "../services/WebSocketRateLimiter";
 interface WebSocketData {
   session_id?: string;
   request_id?: string;
+  /**
+   * Which tenant this widget belongs to, taken from `?business_id=` on the
+   * socket URL. Without it every web chat registered under biz_default, so the
+   * conversation never reached the owner's inbox and any lead it produced was
+   * filed against lead-manager's DEFAULT_BUSINESS_ID instead of the business
+   * the customer was actually talking to.
+   */
+  business_id?: string;
 }
 
 interface IncomingWebSocketMessage {
@@ -43,10 +46,6 @@ function rejectRateLimitedMessage(ws: any, retryAfterMs: number): void {
 }
 
 export const websocketRoutes = new Elysia()
-  /**
-   * WebSocket endpoint for web chat
-   * Path: /ws/chat
-   */
   .ws("/ws/chat", {
     beforeHandle({ request, set }) {
       if (isOriginAllowed(request.headers.get("origin"))) return;
@@ -59,19 +58,23 @@ export const websocketRoutes = new Elysia()
     },
 
     open(ws) {
-      // Generate unique session ID for this connection
       const session_id = generateWebSessionId();
       const request_id = generateCorrelationId();
+      const business_id =
+        typeof (ws.data as { query?: Record<string, string | undefined> }).query?.business_id ===
+        "string"
+          ? (ws.data as { query: Record<string, string> }).query.business_id.trim()
+          : "";
+
       (ws.data as WebSocketData).session_id = session_id;
       (ws.data as WebSocketData).request_id = request_id;
+      if (business_id) (ws.data as WebSocketData).business_id = business_id;
 
-      // Register connection with WebAdapter
       const adapter = getPlatformAdapter("web") as WebAdapter;
       if (adapter) {
         adapter.registerConnection(session_id, ws as any);
       }
 
-      // Send welcome message
       ws.send(JSON.stringify({
         type: "connected",
         session_id,
@@ -86,6 +89,7 @@ export const websocketRoutes = new Elysia()
     async message(ws, data) {
       try {
         let session_id = (ws.data as WebSocketData).session_id;
+        const businessId = (ws.data as WebSocketData).business_id ?? "";
         const request_id =
           (ws.data as WebSocketData).request_id ?? generateCorrelationId();
 
@@ -201,6 +205,7 @@ export const websocketRoutes = new Elysia()
           const result = await messageOrchestrator.processIncomingMessage({
             request_id,
             platform: "web",
+            ...(businessId ? { business_id: businessId } : {}),
             messenger_id: session_id,
             message: imageMessageText,
             image_url: imageUrl,
@@ -229,7 +234,6 @@ export const websocketRoutes = new Elysia()
           return;
         }
 
-        // Validate message
         if (!payload?.message || typeof payload.message !== "string") {
           ws.send(JSON.stringify({
             type: "error",
@@ -246,10 +250,10 @@ export const websocketRoutes = new Elysia()
           `platform=web session_id=${session_id} text="${payload.message}"`
         );
 
-        // Process through orchestrator
         const result = await messageOrchestrator.processIncomingMessage({
           request_id,
           platform: "web",
+          ...(businessId ? { business_id: businessId } : {}),
           messenger_id: session_id,
           message: payload.message,
           first_name: payload.first_name,
@@ -288,7 +292,6 @@ export const websocketRoutes = new Elysia()
       const request_id = (ws.data as WebSocketData).request_id;
       if (!session_id) return;
 
-      // Unregister connection
       const adapter = getPlatformAdapter("web") as WebAdapter;
       if (adapter) {
         adapter.unregisterConnection(session_id);

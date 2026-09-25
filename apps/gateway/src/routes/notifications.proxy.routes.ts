@@ -1,10 +1,5 @@
 import { Elysia } from "elysia";
 
-/**
- * Thin proxy from the public origin to the Notification service, which owns the
- * in-app notification centre. Same reason as the other *.proxy.routes.ts files:
- * the dashboard knows exactly one base URL and cannot reach port 3004 directly.
- */
 const NOTIFICATION_SERVICE_URL =
   process.env.NOTIFICATION_SERVICE_URL ?? "http://localhost:3004";
 const TIMEOUT_MS = 8000;
@@ -38,11 +33,6 @@ async function forward(
   }
 }
 
-/**
- * The business parameter MUST be named `:id` to match businesses.routes.ts —
- * Elysia's router refuses two different parameter names at the same path
- * position. See route-composition.test.ts.
- */
 export const notificationsProxyRoutes = new Elysia()
   .get("/api/businesses/:id/notifications", ({ params, query, set }) => {
     const search = new URLSearchParams();

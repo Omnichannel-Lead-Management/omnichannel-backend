@@ -1,10 +1,5 @@
 import type { Lead } from "../db/schema";
 
-/**
- * Tiny in-process pub/sub for real-time lead events, scoped by tenant.
- * The Web Dashboard subscribes via GET /api/leads/stream?businessId= (SSE) and
- * receives lead.created / lead.updated events for its business only.
- */
 export type LeadEventType = "lead.created" | "lead.updated";
 
 export interface LeadEvent {
@@ -16,7 +11,6 @@ export interface LeadEvent {
 
 type Subscriber = (event: LeadEvent) => void;
 
-// businessId -> set of subscriber callbacks
 const subscribers = new Map<string, Set<Subscriber>>();
 
 export function subscribe(businessId: string, fn: Subscriber): () => void {

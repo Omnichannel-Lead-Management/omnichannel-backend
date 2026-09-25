@@ -75,10 +75,6 @@ export const agentWebsocketRoutes = new Elysia().ws("/ws/agents", {
           return;
         }
 
-        // Auth modes static/jwt derive business_id from the verified token/claim (an
-        // `identity` object is always present in those modes, even if its business_id
-        // is undefined for a "super agent" token). In "none" mode no identity is ever
-        // returned, so there's no auth boundary anyway — trust the client-supplied value.
         const business_id =
           authResult.identity !== undefined ? authResult.identity.business_id : payload.business_id;
 

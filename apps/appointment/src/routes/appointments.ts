@@ -18,10 +18,12 @@ import { validateAvailabilityQuery } from "../validation/availability-query";
 import { validateCreateAppointmentInput } from "../validation/create-appointment";
 import { validateUpdateAppointmentStatus } from "../validation/update-appointment-status";
 
+import { sendConfirmationEmail, type ConfirmationEmailDependencies } from "../services/confirmation-email";
+
 const UUID_PATTERN =
   /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 
-export function createAppointmentRoutes(db: Database): Elysia {
+export function createAppointmentRoutes(db: Database, emailDependencies?: ConfirmationEmailDependencies): Elysia {
   return new Elysia({ prefix: "/api/appointments" })
     .post("/", async ({ body, set }) => {
       const validation = validateCreateAppointmentInput(body);
@@ -36,10 +38,6 @@ export function createAppointmentRoutes(db: Database): Elysia {
       }
 
       try {
-        // Only enforce opening hours for businesses that have actually saved
-        // them. With no saved hours this path behaves exactly as before, rather
-        // than retroactively rejecting bookings against a global default the
-        // tenant never chose.
         const hours = await getBusinessHours(validation.data.businessId);
         if (hours) {
           const startUtc = new Date(validation.data.startTime);
@@ -122,8 +120,6 @@ export function createAppointmentRoutes(db: Database): Elysia {
       try {
         const { businessId, date } = validation.data;
 
-        // Per-business hours when the owner has saved any, else the global
-        // env window. A closed day resolves to null and yields no slots.
         const hours = await getBusinessHours(businessId);
         const window = resolveDayWindow(hours, date);
 
@@ -180,7 +176,7 @@ export function createAppointmentRoutes(db: Database): Elysia {
         };
       }
     })
-    .patch("/:id/status", ({ params, body, set }) => {
+    .patch("/:id/status", async ({ params, body, set }) => {
       const appointmentId = normalizeAppointmentId(params.id);
 
       if (!appointmentId) {
@@ -223,6 +219,10 @@ export function createAppointmentRoutes(db: Database): Elysia {
             success: false,
             message: "Appointment status transition is not allowed.",
           };
+        }
+
+        if (result.appointment.status === "confirmed") {
+          await sendConfirmationEmail(result.appointment, emailDependencies);
         }
 
         return {

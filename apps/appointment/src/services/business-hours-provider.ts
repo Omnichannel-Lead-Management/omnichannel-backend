@@ -1,15 +1,3 @@
-/**
- * Per-business opening hours, owned by the gateway.
- *
- * Opening hours used to come only from the global BUSINESS_OPEN_HOUR /
- * BUSINESS_CLOSE_HOUR env vars, which meant every tenant shared one schedule.
- * The gateway now stores a per-business `business_hours` record (edited in
- * Settings → Business profile), and this module reads it.
- *
- * A business that has never saved hours resolves to `null`, and every caller
- * then falls back to the env vars — so behaviour is unchanged until an owner
- * actually configures something.
- */
 
 import type { BusinessHours } from "./business-hours";
 import { BUSINESS_DAYS } from "./business-hours";
@@ -31,12 +19,22 @@ export function clearBusinessHoursCache(businessId?: string): void {
   else cache.clear();
 }
 
-/** Seed the cache directly. Tests use this instead of standing up a gateway. */
+/** Seed the cache directly. */
 export function primeBusinessHoursCache(businessId: string, hours: BusinessHours | null): void {
   cache.set(businessId, { hours, expiresAt: Date.now() + CACHE_TTL_MS });
 }
 
 const TIME_RE = /^([01]\d|2[0-3]):([0-5]\d)$/;
+
+/**
+ * The gateway requires a credential on `/api/` routes. Sibling services have no
+ * user session, so they present the shared internal token instead.
+ */
+function internalAuthHeaders(): Record<string, string> {
+  const token = process.env.INTERNAL_SERVICE_TOKEN?.trim();
+  return token ? { "X-Internal-Token": token } : {};
+}
+
 
 /** Reject anything that is not the documented shape rather than half-trusting it. */
 function normalize(value: unknown): BusinessHours | null {
@@ -65,22 +63,14 @@ function normalize(value: unknown): BusinessHours | null {
     }
   }
 
-  // An all-closed record is indistinguishable from "never configured" and would
-  // silently block every booking, so treat it as unset.
   return anyEnabled ? result : null;
 }
 
-/**
- * Fetch this business's hours, cached briefly. Any failure resolves to null so
- * the Appointment service keeps working when the gateway is down — bookings
- * then fall back to the global env window rather than failing closed.
- */
+/** Fetch this business's hours, cached briefly. */
 export async function getBusinessHours(businessId: string): Promise<BusinessHours | null> {
   const cached = cache.get(businessId);
   if (cached && cached.expiresAt > Date.now()) return cached.hours;
 
-  // Tests never reach out to a gateway; they seed the cache with
-  // primeBusinessHoursCache instead. Same convention as lead-manager notify.ts.
   if (process.env.NODE_ENV === "test") return null;
 
   const controller = new AbortController();
@@ -90,6 +80,7 @@ export async function getBusinessHours(businessId: string): Promise<BusinessHour
 
   try {
     const res = await fetch(`${GATEWAY_URL}/api/businesses/${encodeURIComponent(businessId)}`, {
+      headers: internalAuthHeaders(),
       signal: controller.signal
     });
     if (res.ok) {

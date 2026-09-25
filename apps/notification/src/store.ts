@@ -1,6 +1,5 @@
 import type { Database } from "bun:sqlite";
 
-/** Matches the dashboard's notification mapper — anything else reads as "other". */
 export const NOTIFICATION_TYPES = ["lead", "appointment", "message", "system"] as const;
 export type NotificationType = (typeof NOTIFICATION_TYPES)[number];
 
@@ -44,7 +43,6 @@ function toDto(row: NotificationRow): NotificationDto {
       const parsed = JSON.parse(row.metadata);
       if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) metadata = parsed;
     } catch {
-      /* a malformed blob should not break the list */
     }
   }
 

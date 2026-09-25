@@ -9,13 +9,6 @@ import {
   utcToLocalDate
 } from "../services/business-hours";
 
-/**
- * The rest of the suite runs at the default UTC+0 / 09:00–17:00 config.
- * Production runs Asia/Colombo (+05:30) with 09:00–18:00, so exercise that
- * configuration explicitly. The env is restored afterwards so these settings
- * cannot leak into other test files.
- */
-
 const ORIGINAL = {
   offset: process.env.BUSINESS_UTC_OFFSET_MINUTES,
   open: process.env.BUSINESS_OPEN_HOUR,
@@ -47,7 +40,6 @@ describe("business hours at UTC+05:30", () => {
   });
 
   test("a UTC instant maps back to the local calendar date", () => {
-    // 19:17Z is already the next day in Colombo.
     expect(utcToLocalDate(new Date("2026-07-29T19:17:00.000Z"))).toBe("2026-07-30");
   });
 
@@ -60,7 +52,6 @@ describe("business hours at UTC+05:30", () => {
   });
 
   test("accepts the last booking before local closing time", () => {
-    // 5:30 PM - 6:00 PM Colombo.
     expect(
       isWithinOpeningHours(
         new Date("2026-07-31T12:00:00.000Z"),
@@ -70,7 +61,6 @@ describe("business hours at UTC+05:30", () => {
   });
 
   test("rejects a booking that would end after local closing time", () => {
-    // 6:00 PM - 6:30 PM Colombo, past an 18:00 close.
     expect(
       isWithinOpeningHours(
         new Date("2026-07-31T12:30:00.000Z"),
@@ -80,7 +70,6 @@ describe("business hours at UTC+05:30", () => {
   });
 
   test("rejects a booking before local opening time", () => {
-    // 8:00 AM Colombo, an hour before opening.
     expect(
       isWithinOpeningHours(
         new Date("2026-07-31T02:30:00.000Z"),

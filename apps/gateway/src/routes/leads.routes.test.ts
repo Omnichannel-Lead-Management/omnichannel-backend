@@ -1,8 +1,5 @@
 import { afterAll, beforeAll, describe, expect, test } from "bun:test";
 
-// A stand-in Lead Manager, so these tests cover the proxy's behaviour rather
-// than the real service's. Started before the route module is imported because
-// leads.routes.ts reads LEAD_MANAGER_URL once at module scope.
 const PORT = 3400 + Math.floor(Math.random() * 300);
 const received: Array<{ method: string; path: string; body: string }> = [];
 

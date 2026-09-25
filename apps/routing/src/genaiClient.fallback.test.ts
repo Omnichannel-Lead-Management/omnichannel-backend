@@ -1,14 +1,5 @@
 import { describe, expect, test } from "bun:test";
 
-/**
- * Vertex exhausts on-demand capacity per model, so a 429 on one model says
- * nothing about the others. These tests pin the retry-then-fallback behaviour
- * that keeps a customer message alive through that.
- *
- * genaiClient builds its client at import time and throws without credentials,
- * so a placeholder key is set before the dynamic import. Every test injects a
- * fake client, so this key is never used for a request.
- */
 process.env.GEMINI_API_KEY ||= "test-key-never-used-fake-client-injected";
 process.env.GOOGLE_GENAI_USE_VERTEXAI ??= "false";
 
@@ -60,7 +51,6 @@ describe("isTransientGenAiError", () => {
   });
 
   test("client and auth errors are not retryable", () => {
-    // Retrying these burns the customer's latency budget on doomed calls.
     expect(isTransientGenAiError(err("404 NOT_FOUND: model unavailable"))).toBe(false);
     expect(isTransientGenAiError(err("403 PERMISSION_DENIED"))).toBe(false);
     expect(isTransientGenAiError(err("400 INVALID_ARGUMENT"))).toBe(false);
@@ -89,7 +79,6 @@ describe("generateContentWithFallback", () => {
   });
 
   test("falls through to the next model when one is out of capacity", async () => {
-    // The real 2026-08-04 shape: flash 0/3 while flash-lite answered every call.
     const { client, calls } = fakeClient({
       "gemini-2.5-flash": err("429 RESOURCE_EXHAUSTED"),
       "gemini-2.5-flash-lite": "ok"

@@ -11,7 +11,6 @@ interface AgentSocketData {
 interface AgentRegistrationPayload {
   agent_id?: string;
   agent_name?: string;
-  /** Business this agent is scoped to. Undefined = "super agent" (sees/acts on every business). */
   business_id?: string;
 }
 
@@ -46,7 +45,6 @@ export interface EscalatedChatSummary {
 interface AgentConnection {
   agent_id: string;
   agent_name: string;
-  /** Undefined = super agent (sees/acts on every business). */
   business_id?: string;
   ws: ServerWebSocket<AgentSocketData>;
   connected_at: string;
@@ -87,7 +85,6 @@ export class AgentHub {
       try {
         existing.ws.close(4001, "Session replaced");
       } catch {
-        // Ignore close errors
       }
 
       this.agents.delete(agent_id);
@@ -141,6 +138,12 @@ export class AgentHub {
     return this.agents.size;
   }
 
+  /** Whether this specific agent still holds a live socket — the test for "is the human who claimed this chat still here?". */
+  isAgentConnected(agent_id: string | null | undefined): boolean {
+    if (!agent_id) return false;
+    return this.agents.has(agent_id);
+  }
+
   /** True if this agent (super agent, or one scoped to business_id) may act on that business's chats. */
   private isAuthorizedForBusiness(agent_id: string, business_id: string): boolean {
     const connection = this.agents.get(agent_id);
@@ -163,10 +166,7 @@ export class AgentHub {
     });
   }
 
-  /**
-   * Send every connected agent their own filtered queue snapshot — super agents see
-   * every business's escalated chats, scoped agents only see their own business's.
-   */
+  /** Send every connected agent the queue snapshot filtered to the businesses they may see. */
   async broadcastQueueSnapshot(): Promise<void> {
     for (const connection of this.agents.values()) {
       const chats = await this.getEscalatedChats(connection.business_id);
@@ -228,6 +228,19 @@ export class AgentHub {
 
     const historyPage = await this.getHistory(normalizedPlatform, messenger_id, 30, undefined, targetBusinessId);
 
+    const claimedMessage = "A customer care agent has joined this chat and will take it from here.";
+    const adapter = await this.resolveAdapter(normalizedPlatform, targetBusinessId);
+    if (adapter) {
+      await adapter.sendMessage(messenger_id, claimedMessage);
+    }
+
+    await this.saveAssistantMessage(normalizedPlatform, messenger_id, targetBusinessId, claimedMessage, {
+      from_agent: false,
+      system: true,
+      type: "claimed",
+      agent_id
+    });
+
     this.broadcastToBusiness(targetBusinessId, {
       type: "chat_claimed",
       platform: normalizedPlatform,
@@ -264,9 +277,11 @@ export class AgentHub {
       return { success: false, error: "Conversation is not escalated." };
     }
 
-    if (conversation.claimed_by_agent_id !== agent_id) {
+    if (conversation.claimed_by_agent_id && conversation.claimed_by_agent_id !== agent_id) {
       return { success: false, error: "Only the claiming agent can release this conversation." };
     }
+
+    const wasClaimed = Boolean(conversation.claimed_by_agent_id);
 
     await db
       .update(schema.messengers)
@@ -286,7 +301,9 @@ export class AgentHub {
         )
       );
 
-    const deEscalationMessage = "Your conversation with customer care is complete. You can continue chatting with the AI assistant.";
+    const deEscalationMessage = wasClaimed
+      ? "Your conversation with customer care is complete. You can continue chatting with the AI assistant."
+      : "Our customer care team has closed this request. You can keep chatting with the AI assistant here.";
     const adapter = await this.resolveAdapter(normalizedPlatform, targetBusinessId);
     if (adapter) {
       await adapter.sendMessage(messenger_id, deEscalationMessage);
@@ -364,6 +381,7 @@ export class AgentHub {
       from: "agent",
       text: trimmedMessage,
       agent_id,
+      escalation_status: "claimed",
       timestamp
     });
 
@@ -454,38 +472,53 @@ export class AgentHub {
     await this.broadcastQueueSnapshot();
   }
 
-  async handleEscalatedUserMessage(payload: {
+  /**
+   * Mirror one message into every open dashboard so the inbox is live.
+   *
+   * This deliberately does not require an escalation: an agent watching a chat
+   * the bot is handling still needs to see it move, otherwise the inbox only
+   * updates when they reopen the conversation or reload the page.
+   */
+  async notifyConversationMessage(payload: {
     platform: string;
     messenger_id: string;
     business_id?: string;
+    from: "user" | "ai" | "agent";
     text: string;
+    agent_id?: string;
     timestamp?: string;
   }): Promise<void> {
+    const normalizedPlatform = payload.platform.toLowerCase();
     const targetBusinessId = payload.business_id || "biz_default";
-    const conversation = await this.getMessenger(payload.platform, payload.messenger_id, targetBusinessId);
-    if (!conversation || !conversation.is_escalated) {
-      return;
-    }
+    const conversation = await this.getMessenger(normalizedPlatform, payload.messenger_id, targetBusinessId);
+    const escalated = Boolean(conversation?.is_escalated);
 
     this.broadcastToBusiness(targetBusinessId, {
       type: "chat_message",
-      platform: payload.platform,
+      platform: normalizedPlatform,
       messenger_id: payload.messenger_id,
       business_id: targetBusinessId,
-      from: "user",
+      from: payload.from,
       text: payload.text,
+      agent_id: payload.agent_id,
       timestamp: payload.timestamp || new Date().toISOString(),
-      claimed_by_agent_id: conversation.claimed_by_agent_id
+      display_name: conversation ? this.mapMessengerToSummary(conversation).display_name : undefined,
+      is_escalated: escalated,
+      escalation_status: escalated
+        ? conversation!.claimed_by_agent_id
+          ? "claimed"
+          : "queued"
+        : "none",
+      claimed_by_agent_id: conversation?.claimed_by_agent_id ?? null
     });
 
-    await this.broadcastQueueSnapshot();
+    // Only an escalated chat sits in the queue, so only it can change the queue.
+    if (escalated) {
+      await this.broadcastQueueSnapshot();
+    }
   }
 
-  /**
-   * Resolve the adapter to send through for a business's escalated conversation —
-   * that business's own bot credentials, falling back to the global singleton
-   * (legacy single-tenant .env-based setup) if the business has none configured.
-   */
+  /** Resolve the adapter for a business's escalated conversation, falling back to the global singleton. */
   private async resolveAdapter(platform: string, business_id: string) {
     if (business_id !== "biz_default") {
       const business = await getBusinessById(business_id);
@@ -608,7 +641,6 @@ export class AgentHub {
     try {
       ws.send(JSON.stringify(payload));
     } catch {
-      // Ignore websocket send failures
     }
   }
 

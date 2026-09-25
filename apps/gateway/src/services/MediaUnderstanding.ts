@@ -1,22 +1,5 @@
 import { GoogleGenAI } from "@google/genai";
 
-/**
- * Turns inbound voice notes and photos into text the rest of the pipeline can
- * already handle.
- *
- * The bytes go straight to Gemini as `inlineData` — deliberately NOT uploaded
- * anywhere first. Hosting the file would mean running object storage just to
- * produce a URL the model reads once, and every downstream service (routing,
- * chatbot, lead-manager, appointment) speaks plain text anyway. Resolving media
- * to text here means none of them need to change.
- *
- * Gemini also transcribes audio natively, so there is no separate speech-to-text
- * service to deploy or keep alive.
- *
- * Every function returns null rather than throwing: a customer who sent a photo
- * must still get a reply, even if the model is unavailable.
- */
-
 const MODEL = process.env.GEMINI_MODEL ?? "gemini-2.5-flash";
 const LOCATION = process.env.GOOGLE_CLOUD_LOCATION ?? "us-central1";
 const TIMEOUT_MS = 20_000;
@@ -72,13 +55,7 @@ async function withTimeout<T>(promise: Promise<T>): Promise<T> {
   ]);
 }
 
-/**
- * Transcribe a voice note in the speaker's own language.
- *
- * Sri Lankan customers write and speak in English, Sinhala and Tamil, so the
- * transcript is deliberately NOT translated — downstream language detection and
- * the agent replying by hand both want the original words.
- */
+/** Transcribe a voice note in the speaker's own language. */
 export async function transcribeVoice(
   data: Uint8Array,
   mimeType: string
@@ -121,13 +98,7 @@ export interface ImageUnderstanding {
   intent_hint: string;
 }
 
-/**
- * Describe a photo a customer sent, in terms of what the business could act on.
- *
- * `sector` comes from the tenant's own record, so a salon gets a description of
- * a hairstyle and a photographer gets one of a shooting style — one prompt, every
- * kind of vendor on the platform.
- */
+/** Describe a photo a customer sent, in terms of what the business could act on. */
 export async function describeCustomerImage(
   data: Uint8Array,
   mimeType: string,
@@ -180,13 +151,7 @@ export async function describeCustomerImage(
   }
 }
 
-/**
- * Compose the message text the pipeline sees for a photo.
- *
- * The caption is preserved rather than replaced — it is usually the actual
- * question ("is this something you do?"), and dropping it was what made the bot
- * answer confidently about images it had never seen.
- */
+/** Compose the message text the pipeline sees for a photo. */
 export function photoMessageText(
   understanding: ImageUnderstanding | null,
   caption?: string
@@ -199,8 +164,6 @@ export function photoMessageText(
       : "[The customer sent a photo that could not be viewed and said nothing else]";
   }
 
-  // Gemini usually ends the description with a full stop; adding another gives
-  // "…yellow.. They ask".
   const described = understanding.description.replace(/[.\s]+$/, "");
   const base = `[Photo] The customer sent a photo showing: ${described}.`;
   return asked

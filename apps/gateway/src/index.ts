@@ -1,9 +1,3 @@
-/**
- * Hemas Messaging Orchestrator
- *
- * Main application entry point
- * Pure routing/storage/forwarding - NO AI logic here
- */
 
 import { Elysia } from "elysia";
 import { cors } from "@elysiajs/cors";
@@ -24,20 +18,20 @@ import { appointmentsProxyRoutes } from "./routes/appointments.proxy.routes";
 import { chatbotProxyRoutes } from "./routes/chatbot.proxy.routes";
 import { notificationsProxyRoutes } from "./routes/notifications.proxy.routes";
 import { healthRoutes } from "./routes/health.routes";
+import { authRoutes } from "./routes/auth.routes";
+import { authorize } from "./middleware/requireAuth";
+import { sessionAuthService } from "./services/SessionAuth";
 import {
   describeAllowedCorsOrigins,
   getAllowedCorsOrigins,
   isOriginAllowed
 } from "./services/SecurityConfig";
 
-// Environment variables
 const PORT = process.env.PORT || 3000;
 const NODE_ENV = process.env.NODE_ENV || "development";
 const allowedCorsOrigins = getAllowedCorsOrigins();
 
-/**
- * Initialize application
- */
+/** Initialize application */
 async function init() {
   console.log("🚀 Starting Messaging Orchestrator...");
   console.log(`📍 Environment: ${NODE_ENV}`);
@@ -50,16 +44,31 @@ async function init() {
     );
   }
 
-  // Initialize database
+  // Without a signing secret every `/api/` route answers 503 rather than
+  // falling open, so in production this is a startup failure, not a warning.
+  if (!sessionAuthService.configured) {
+    const message =
+      "AUTH_JWT_SECRET is not set — dashboard sessions cannot be issued or verified.";
+    if (NODE_ENV === "production") throw new Error(message);
+    console.warn(`⚠️  ${message}`);
+  } else {
+    console.log("🔐 Dashboard session authentication enabled");
+  }
+
+  if (!process.env.INTERNAL_SERVICE_TOKEN?.trim()) {
+    console.warn(
+      "⚠️  INTERNAL_SERVICE_TOKEN is not set — chatbot, lead-manager and appointment " +
+        "cannot read business profiles, so confirmation email will lose its recipient."
+    );
+  }
+
   await initDatabase();
 
-  // Initialize platform adapters
   await initializePlatforms();
 
   console.log("✅ Initialization complete");
 }
 
-// Create Elysia app
 const app = new Elysia()
   .use(cors({
     origin: (request) => isOriginAllowed(request.headers.get("origin")),
@@ -80,7 +89,6 @@ const app = new Elysia()
     },
     path: "/docs"
   }))
-  // Root endpoint
   .get("/", () => ({
     name: "Messaging Orchestrator",
     version: "1.0.0",
@@ -96,6 +104,8 @@ const app = new Elysia()
       upload_image: "POST /api/upload-image",
       agent_status: "GET /api/agents/status",
       businesses: "POST /api/businesses",
+      login: "POST /api/auth/login",
+      session: "GET /api/auth/me",
       telegram_webhook: "POST /webhook/telegram",
       telegram_webhook_multi_tenant: "POST /webhook/telegram/:business_id",
       whatsapp_webhook: "POST /webhook/whatsapp",
@@ -104,14 +114,23 @@ const app = new Elysia()
       agent_websocket: "WS /ws/agents"
     }
   }))
-  // Register routes
+  // onRequest runs before route matching, so this covers every route on the
+  // app — including those merged in by `.use()` below — without depending on
+  // Elysia's per-instance hook scoping. A security gate must not be able to
+  // miss a route because of where it was mounted.
+  .onRequest(async ({ request, set }) => {
+    const decision = await authorize(request);
+    if (decision.allow) return;
+
+    set.status = decision.status ?? 401;
+    return { success: false, error: decision.error ?? "Authentication required" };
+  })
+  .use(authRoutes)
   .use(messagingRoutes)
   .use(uploadRoutes)
   .use(agentsRoutes)
   .use(leadsRoutes)
   .use(appointmentsProxyRoutes)
-  // Before businessesRoutes: both own paths under /api/businesses/:id, and the
-  // more specific proxy routes must be matched first.
   .use(chatbotProxyRoutes)
   .use(notificationsProxyRoutes)
   .use(businessesRoutes)
@@ -121,7 +140,6 @@ const app = new Elysia()
   .use(evolutionRoutes)
   .use(websocketRoutes)
   .use(agentWebsocketRoutes)
-  // Error handler
   .onError(({ code, error, set }) => {
     console.error(`❌ Error [${code}]:`, error);
 
@@ -150,7 +168,6 @@ const app = new Elysia()
   })
   .listen(PORT);
 
-// Initialize and start
 await init();
 
 console.log(`

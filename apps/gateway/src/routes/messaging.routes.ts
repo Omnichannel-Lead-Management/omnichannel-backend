@@ -1,28 +1,35 @@
-/**
- * Messaging API Routes
- *
- * Main endpoints:
- * - POST /api/messaging/receive - Receive messages from any platform
- * - POST /api/messaging/reply - Receive replies from external AI
- * - GET /api/messaging/history - Get chat history
- */
 
 import { Elysia, t } from "elysia";
 import { messageOrchestrator } from "../services/MessageOrchestrator";
 import { getPlatformAdapter, isPlatformSupported } from "../platforms";
 import type { IncomingMessage, ReplyMessage } from "../platforms/PlatformAdapter";
 
+/**
+ * Body accepted by POST /api/messaging/receive.
+ *
+ * Exported so it can be asserted against directly: Elysia strips any property
+ * this schema does not declare, and omitting `business_id` silently routed
+ * every caller-targeted message to biz_default — accepted with 200, replied
+ * to, and never evaluated against the tenant's FAQs, flow or lead capture.
+ */
+export const incomingMessageBody = t.Object({
+  platform: t.String({ minLength: 1 }),
+  business_id: t.Optional(t.String()),
+  messenger_id: t.String({ minLength: 1 }),
+  message: t.String({ minLength: 1 }),
+  first_name: t.Optional(t.String()),
+  last_name: t.Optional(t.String()),
+  username: t.Optional(t.String()),
+  phone: t.Optional(t.String()),
+  language: t.Optional(t.String()),
+  metadata: t.Optional(t.Any())
+});
+
 export const messagingRoutes = new Elysia({ prefix: "/api/messaging" })
-  /**
-   * POST /api/messaging/receive
-   *
-   * Universal endpoint for receiving messages from ANY platform
-   */
   .post(
     "/receive",
     async ({ body, set }) => {
       try {
-        // Validate platform
         if (!isPlatformSupported(body.platform)) {
           set.status = 400;
           return {
@@ -31,7 +38,6 @@ export const messagingRoutes = new Elysia({ prefix: "/api/messaging" })
           };
         }
 
-        // Validate required fields
         if (!body.messenger_id || !body.message) {
           set.status = 400;
           return {
@@ -40,7 +46,6 @@ export const messagingRoutes = new Elysia({ prefix: "/api/messaging" })
           };
         }
 
-        // Process message through orchestrator
         const result = await messageOrchestrator.processIncomingMessage(body as IncomingMessage);
 
         if (!result.success) {
@@ -57,17 +62,7 @@ export const messagingRoutes = new Elysia({ prefix: "/api/messaging" })
       }
     },
     {
-      body: t.Object({
-        platform: t.String({ minLength: 1 }),
-        messenger_id: t.String({ minLength: 1 }),
-        message: t.String({ minLength: 1 }),
-        first_name: t.Optional(t.String()),
-        last_name: t.Optional(t.String()),
-        username: t.Optional(t.String()),
-        phone: t.Optional(t.String()),
-        language: t.Optional(t.String()),
-        metadata: t.Optional(t.Any())
-      }),
+      body: incomingMessageBody,
       detail: {
         summary: "Receive message from any platform",
         description: "Universal endpoint for incoming messages. Processes, stores, and forwards to AI.",
@@ -76,18 +71,12 @@ export const messagingRoutes = new Elysia({ prefix: "/api/messaging" })
     }
   )
 
-  /**
-   * POST /api/messaging/reply
-   *
-   * Receive reply from external AI and forward to the correct platform
-   */
   .post(
     "/reply",
     async ({ body, set }) => {
       try {
         const { platform, messenger_id, reply_text, metadata } = body as ReplyMessage;
 
-        // Validate platform
         if (!isPlatformSupported(platform)) {
           set.status = 400;
           return {
@@ -96,7 +85,6 @@ export const messagingRoutes = new Elysia({ prefix: "/api/messaging" })
           };
         }
 
-        // Get platform adapter
         const adapter = getPlatformAdapter(platform);
         if (!adapter) {
           set.status = 500;
@@ -106,10 +94,8 @@ export const messagingRoutes = new Elysia({ prefix: "/api/messaging" })
           };
         }
 
-        // Save reply to database
         await messageOrchestrator.saveReply(messenger_id, platform, reply_text, metadata);
 
-        // Send reply via platform adapter
         const result = await adapter.sendMessage(messenger_id, reply_text, metadata);
 
         if (!result.success) {
@@ -140,11 +126,6 @@ export const messagingRoutes = new Elysia({ prefix: "/api/messaging" })
     }
   )
 
-  /**
-   * GET /api/messaging/history
-   *
-   * Get chat history for a specific messenger
-   */
   .get(
     "/history",
     async ({ query, set }) => {
@@ -212,11 +193,6 @@ export const messagingRoutes = new Elysia({ prefix: "/api/messaging" })
     }
   )
 
-  /**
-   * GET /api/messaging/health
-   *
-   * Health check endpoint
-   */
   .get(
     "/health",
     () => ({

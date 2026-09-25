@@ -1,8 +1,3 @@
-/**
- * Types shared across the Lead Manager service.
- * The `/chat` request/response shapes mirror the platform contract in
- * routing-service/src/types.ts so Routing can call us unchanged.
- */
 
 export type LeadStatus = "new" | "contacted" | "qualified" | "converted" | "lost";
 
@@ -52,7 +47,6 @@ export interface ChatResponse {
   error?: string;
 }
 
-/** Signals fed to the scoring function. Keep this explainable for the report. */
 export interface ScoreSignals {
   source?: string;
   service_interest?: string;
@@ -63,6 +57,6 @@ export interface ScoreSignals {
 }
 
 export interface ScoreResult {
-  score: number; // clamped 0-100
-  reasons: string[]; // human-readable rule hits, for auditability
+  score: number;
+  reasons: string[];
 }

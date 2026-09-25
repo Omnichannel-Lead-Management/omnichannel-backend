@@ -11,9 +11,6 @@ import type {
   LanguageCode
 } from "./types";
 
-// Vertex on-demand latency was measured at 7–26s on 2026-08-04, and a downstream
-// agent may make its own Gemini call on top of the router's. At 15s this timeout
-// fired on healthy-but-slow calls and the customer got nothing.
 const DOWNSTREAM_TIMEOUT_MS = Number(process.env.DOWNSTREAM_TIMEOUT_MS ?? 45_000);
 
 type LogLevel = "info" | "warn" | "error";
@@ -362,7 +359,6 @@ function buildGreetingResponse(req: ChatRequest): AgentMessage[] {
   const caps = req.platform_capabilities;
 
   if (caps?.quick_replies) {
-    // Respect platform button limit
     const limited =
       caps.max_quick_replies !== null
         ? quickReplies.slice(0, caps.max_quick_replies)
@@ -398,8 +394,6 @@ export async function route(req: ChatRequest): Promise<ChatResponse> {
   req.language = languageTagToCode(defaultLanguageTag);
 
   try {
-    // Skip image handling for Lead Management system
-    // Images can be processed if needed by specific agents
 
     logWithRequestId(
       requestId,
@@ -430,7 +424,6 @@ export async function route(req: ChatRequest): Promise<ChatResponse> {
       `chosen_agent=${decision.agent} language=${finalLanguageTag} reason="${decision.reasoning}"`
     );
 
-    // Handle greetings and small talk locally — no downstream agent needed
     if (decision.agent === "general") {
       return {
         success: true,
@@ -453,6 +446,9 @@ export async function route(req: ChatRequest): Promise<ChatResponse> {
       agent: decision.agent,
       messages,
       escalated,
+      ...(escalated
+        ? { escalation_tag: decision.agent, escalation_summary: decision.summary }
+        : {}),
       routing: {
         intent: decision.agent,
         summary: decision.summary,

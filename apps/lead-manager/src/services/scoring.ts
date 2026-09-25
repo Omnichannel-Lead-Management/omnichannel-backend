@@ -1,11 +1,5 @@
 import type { ScoreResult, ScoreSignals } from "../types";
 
-/**
- * Rule-based, explainable lead scoring (task L3).
- * Each rule is a data record so the rationale can be printed in the report and
- * returned to the caller as `reasons[]`. Final score = sum of matched rule
- * points, clamped 0-100. Deliberately NOT an opaque ML model.
- */
 interface ScoreRule {
   key: string;
   points: number;
@@ -65,8 +59,6 @@ export function scoreLead(signals: ScoreSignals): ScoreResult {
     }
   }
 
-  // Escalation / complaint is a flag, not a numeric bump — surface it so the
-  // caller can tag the lead and trigger a notification.
   if (signals.escalated) {
     reasons.push("⚑ Escalated / complaint — flag for human follow-up");
   }

@@ -163,7 +163,7 @@ Course accepts mobile-friendly web. Test layouts on phone width (~375px):
 | Template | Trigger |
 |----------|---------|
 | `new_lead` | Lead created / assigned |
-| `appointment_confirmed` | Booking created |
+| `appointment_confirmed` | Pending booking successfully confirmed (owner/staff email) |
 | `appointment_reminder` | Optional 24h before |
 
 ### Checklist

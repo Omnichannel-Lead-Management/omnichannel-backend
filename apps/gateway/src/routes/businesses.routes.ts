@@ -4,6 +4,7 @@ import {
   connectWhatsAppEvolution,
   createBusiness,
   getBusinessById,
+  getBusinessByOwnerEmail,
   getEvolutionConnectionStatus,
   listConversations,
   refetchEvolutionQrCode,
@@ -11,12 +12,10 @@ import {
 } from "../services/BusinessRegistry";
 import { BusinessHoursError, parseStoredBusinessHours } from "../services/BusinessHours";
 import { buildBusinessAnalytics, resolveRange } from "../services/AnalyticsService";
+import { MIN_PASSWORD_LENGTH, sessionAuthService } from "../services/SessionAuth";
 
-/**
- * Strip secrets before returning a business row over the API. telegram_bot_token,
- * telegram_webhook_secret and whatsapp_instance_token must never appear here.
- */
-function toPublicBusiness(business: Awaited<ReturnType<typeof getBusinessById>>) {
+/** Strip secrets before returning a business row over the API. */
+export function toPublicBusiness(business: Awaited<ReturnType<typeof getBusinessById>>) {
   if (!business) return null;
 
   return {
@@ -24,6 +23,7 @@ function toPublicBusiness(business: Awaited<ReturnType<typeof getBusinessById>>)
     name: business.name,
     sector: business.sector,
     owner_email: business.owner_email,
+    owner_name: business.owner_name,
     chatbot_enabled: Boolean(business.chatbot_enabled),
     timezone: business.timezone,
     contact_phone: business.contact_phone,
@@ -44,7 +44,26 @@ export const businessesRoutes = new Elysia({ prefix: "/api/businesses" })
     "/",
     async ({ body, set }) => {
       try {
-        const business = await createBusiness(body);
+        // Registration is the one unauthenticated write, so a new tenant must
+        // arrive with a password — otherwise the account it creates could
+        // never be signed into and would sit there unclaimed.
+        const { password, ...profile } = body;
+        if (password.length < MIN_PASSWORD_LENGTH) {
+          set.status = 400;
+          return {
+            success: false,
+            error: `Password must be at least ${MIN_PASSWORD_LENGTH} characters`
+          };
+        }
+        if (profile.owner_email && (await getBusinessByOwnerEmail(profile.owner_email))) {
+          set.status = 409;
+          return { success: false, error: "That owner email is already registered" };
+        }
+
+        const business = await createBusiness({
+          ...profile,
+          password_hash: await sessionAuthService.hashPassword(password)
+        });
         set.status = 201;
         return { success: true, business: toPublicBusiness(business) };
       } catch (error) {
@@ -56,7 +75,9 @@ export const businessesRoutes = new Elysia({ prefix: "/api/businesses" })
       body: t.Object({
         name: t.String({ minLength: 1 }),
         sector: t.String({ minLength: 1 }),
-        owner_email: t.Optional(t.String())
+        owner_email: t.Optional(t.String()),
+        owner_name: t.Optional(t.String({ maxLength: 120 })),
+        password: t.String({ minLength: 1 })
       }),
       detail: { summary: "Register a new business (vendor/tenant)", tags: ["Businesses"] }
     }
@@ -98,6 +119,7 @@ export const businessesRoutes = new Elysia({ prefix: "/api/businesses" })
         name: t.Optional(t.String({ minLength: 1, maxLength: 160 })),
         sector: t.Optional(t.String({ minLength: 1, maxLength: 80 })),
         owner_email: t.Optional(t.Nullable(t.String({ maxLength: 320 }))),
+        owner_name: t.Optional(t.Nullable(t.String({ maxLength: 120 }))),
         timezone: t.Optional(t.Nullable(t.String({ maxLength: 64 }))),
         contact_phone: t.Optional(t.Nullable(t.String({ maxLength: 40 }))),
         address: t.Optional(t.Nullable(t.String({ maxLength: 500 }))),

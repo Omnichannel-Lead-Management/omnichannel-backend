@@ -5,13 +5,6 @@ import {
   generateCorrelationId
 } from "../middleware/correlationId";
 
-/**
- * TelegramAdapter
- *
- * Handles sending messages to Telegram users via Telegram Bot API.
- * Interactive support: inline keyboard (quick replies + URL buttons).
- * Lists are not natively supported — the orchestrator falls back to numbered text.
- */
 export class TelegramAdapter implements PlatformAdapter {
   readonly name = "telegram";
 
@@ -129,7 +122,6 @@ export class TelegramAdapter implements PlatformAdapter {
       const hasQuickReplies = (message.quick_replies?.length ?? 0) > 0;
       const hasUrlButtons = (message.url_buttons?.length ?? 0) > 0;
 
-      // Prefer reply keyboards for quick replies so Telegram sends a visible user message on tap.
       if (hasQuickReplies && !hasUrlButtons) {
         const keyboard: Array<Array<{ text: string }>> = [];
         const chunk = 2;
@@ -169,7 +161,6 @@ export class TelegramAdapter implements PlatformAdapter {
         return { success: true };
       }
 
-      // Build inline keyboard rows — 2 quick-reply buttons per row
       const rows: Record<string, unknown>[][] = [];
 
       if (message.quick_replies?.length) {
@@ -178,13 +169,12 @@ export class TelegramAdapter implements PlatformAdapter {
           rows.push(
             message.quick_replies.slice(i, i + chunk).map(btn => ({
               text: btn.label,
-              callback_data: (btn.value ?? btn.label).slice(0, 64) // Telegram limit
+              callback_data: (btn.value ?? btn.label).slice(0, 64)
             }))
           );
         }
       }
 
-      // URL buttons each get their own row
       if (message.url_buttons?.length) {
         for (const btn of message.url_buttons) {
           rows.push([{ text: btn.label, url: btn.url }]);
@@ -276,7 +266,6 @@ export class TelegramAdapter implements PlatformAdapter {
           return fromPath;
         }
       } catch {
-        // Ignore URL parse errors and use fallback filename below.
       }
       return `voice_${Date.now()}.mp3`;
     };
@@ -390,10 +379,7 @@ export class TelegramAdapter implements PlatformAdapter {
     }
   }
 
-  /**
-   * Download a file from Telegram servers by file_id.
-   * Returns the raw bytes and metadata, or null on failure.
-   */
+  /** Download a file from Telegram servers by file_id. */
   async downloadFile(
     fileId: string,
     requestId?: string
@@ -480,12 +466,7 @@ export class TelegramAdapter implements PlatformAdapter {
   }
 }
 
-/**
- * Helper function to format Telegram webhook payload to standard format.
- * Returns null if the update carries no processable content (text or photo).
- * When a photo is present, `_photo_file_id` is set so the route handler can
- * download and upload it to storage before calling the orchestrator.
- */
+/** Helper function to format Telegram webhook payload to standard format. */
 export function formatTelegramWebhook(update: any) {
   const callbackQuery = update?.callback_query;
   if (callbackQuery) {
@@ -527,7 +508,6 @@ export function formatTelegramWebhook(update: any) {
   const message = update.message;
   if (!message) return null;
 
-  // Only handle text, photo, voice, and audio messages
   if (!message.text && !message.photo && !message.voice && !message.audio) return null;
 
   const from = message.from;
@@ -548,7 +528,6 @@ export function formatTelegramWebhook(update: any) {
     }
   };
 
-  // Extract reply context when the user replies to an earlier message
   if (message.reply_to_message) {
     const replied = message.reply_to_message;
     const repliedText: string = replied.text || replied.caption || "";
@@ -560,10 +539,6 @@ export function formatTelegramWebhook(update: any) {
     }
   }
 
-  // Media is downloaded and resolved to text by the route handler. The caption
-  // travels separately as `_caption` so it can be kept ALONGSIDE the description
-  // or transcript — it is usually the customer's actual question. The placeholder
-  // set here is only a fallback if understanding fails.
   const caption = typeof message.caption === "string" ? message.caption : "";
 
   if (message.photo && Array.isArray(message.photo) && message.photo.length > 0) {

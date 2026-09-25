@@ -10,7 +10,6 @@ import {
   primeBusinessHoursCache,
 } from "../services/business-hours-provider";
 
-// 2026-08-11 is a Tuesday.
 const tuesday = "2026-08-11";
 const wednesday = "2026-08-12";
 const businessId = "salon-001";
@@ -84,7 +83,6 @@ describe("per-business opening hours", () => {
 
     const body = await (await getAvailability(app, businessId, tuesday)).json();
 
-    // 10:00–14:00 in 30-minute slots.
     expect(body.data.slots).toHaveLength(8);
     expect(body.data.slots[0].startTime).toBe(`${tuesday}T10:00:00.000Z`);
     expect(body.data.slots.at(-1).endTime).toBe(`${tuesday}T14:00:00.000Z`);
@@ -141,8 +139,6 @@ describe("per-business opening hours", () => {
   });
 
   test("with no saved hours the booking path is unchanged (no hours enforcement)", async () => {
-    // Previously the create route did not check opening hours at all; a tenant
-    // that never configured any must not start getting rejections.
     const response = await book(app, `${tuesday}T20:00:00.000Z`, `${tuesday}T20:30:00.000Z`);
 
     expect(response.status).toBe(201);

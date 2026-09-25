@@ -336,7 +336,6 @@ function inferFilenameFromMediaUrl(mediaUrl: string, fallbackExt: string = "bin"
       return base;
     }
   } catch {
-    // URL may be relative/invalid; use fallback filename below.
   }
   return `audio_${Date.now()}.${fallbackExt}`;
 }
@@ -632,7 +631,6 @@ export async function formatWhatsAppWebhook(
           typeof incoming.timestamp === "string" ? incoming.timestamp : new Date().toISOString();
         const profileName = contactNames.get(from);
 
-        // Look up the original message when the user replied to one
         let repliedTo: { text: string; is_from_user: boolean } | undefined;
         if (isRecord(incoming.context)) {
           const replyToId = typeof incoming.context.id === "string" ? incoming.context.id : "";
@@ -816,7 +814,6 @@ export async function formatWhatsAppWebhook(
           const imageCaption =
             typeof imagePayload.caption === "string" ? imagePayload.caption.trim() : "";
 
-          // Route image URL through the same text-based orchestration pipeline.
           const messageText = imageUrl || imageCaption || "[image]";
 
           messages.push({
@@ -928,10 +925,6 @@ export async function formatWhatsAppWebhook(
 export class WhatsAppAdapter implements PlatformAdapter {
   readonly name = "whatsapp";
 
-  /**
-   * WhatsApp supports quick-reply buttons (≤3) and list messages (>3 or explicit list).
-   * URL buttons are not supported as interactive buttons — they fall back to text.
-   */
   readonly capabilities: PlatformCapabilities = {
     quick_replies: true,
     url_buttons: false,
@@ -939,13 +932,7 @@ export class WhatsAppAdapter implements PlatformAdapter {
     max_quick_replies: 3
   };
 
-  /**
-   * Send an interactive message.
-   *
-   * - quick_replies (≤3, no list) → WhatsApp reply-button interactive message
-   * - quick_replies (>3) OR list provided → WhatsApp list interactive message
-   * - url_buttons only → plain text fallback (WhatsApp doesn't support URL buttons natively)
-   */
+  /** Send an interactive message. */
   async sendInteractive(
     messenger_id: string,
     message: Extract<AgentMessage, { type: "interactive" }>,
@@ -954,12 +941,10 @@ export class WhatsAppAdapter implements PlatformAdapter {
     const requestId = extractRequestId(metadata) ?? generateCorrelationId();
     const bodyText = normalizeInteractiveText(message.text, 1024) || "Please choose an option.";
 
-    // Decide which interactive format to use
     const hasQuickReplies = (message.quick_replies?.length ?? 0) > 0;
     const hasList = !!message.list;
     const overButtonLimit = (message.quick_replies?.length ?? 0) > 3;
 
-    // If only URL buttons (or nothing interactive), fall back to text
     if (!hasQuickReplies && !hasList) {
       return sendTextPayload(messenger_id, message.text, {
         applyNotificationThrottle: false,
@@ -968,7 +953,6 @@ export class WhatsAppAdapter implements PlatformAdapter {
     }
 
     if (!hasList && hasQuickReplies && !overButtonLimit) {
-      // ── Reply-button message (≤3 buttons) ──────────────────────────────────
       const usedButtonIds = new Set<string>();
       const buttons: Array<{ type: "reply"; reply: { id: string; title: string } }> = [];
 
@@ -1013,7 +997,6 @@ export class WhatsAppAdapter implements PlatformAdapter {
       );
     }
 
-    // ── List message (>3 quick replies OR explicit list) ────────────────────
     const usedRowIds = new Set<string>();
     let sections: Array<{ title?: string; rows: Array<{ id: string; title: string; description?: string }> }> = [];
 
@@ -1157,7 +1140,6 @@ export class WhatsAppAdapter implements PlatformAdapter {
     metadata?: Record<string, unknown>
   ): Promise<SendResult> {
     const requestId = extractRequestId(metadata);
-    // Interactive chat replies should not be blocked by notification throttling.
     return sendTextPayload(messenger_id, message, {
       applyNotificationThrottle: false,
       requestId
@@ -1171,7 +1153,6 @@ export class WhatsAppAdapter implements PlatformAdapter {
     metadata?: Record<string, unknown>
   ): Promise<SendResult> {
     const requestId = extractRequestId(metadata);
-    // Interactive chat replies should not be blocked by notification throttling.
     return sendImagePayload(messenger_id, url, caption, {
       applyNotificationThrottle: false,
       requestId

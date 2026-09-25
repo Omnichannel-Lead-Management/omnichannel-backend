@@ -3,17 +3,11 @@ import { drizzle } from "drizzle-orm/postgres-js";
 import * as schema from "./schema";
 import { sql } from "drizzle-orm";
 
-// Postgres connection string. Heroku Postgres injects this as DATABASE_URL
-// automatically once the add-on is provisioned (both locally via `heroku local`
-// and on the deployed dyno).
 const connectionString =
   process.env.DATABASE_URL || "postgres://postgres:postgres@localhost:5432/messaging";
 
-// Optional: isolate a test/smoke run into its own schema instead of `public`.
 const schemaName = process.env.DATABASE_SCHEMA?.trim();
 
-// Heroku Postgres requires SSL; local/dev Postgres usually doesn't have it configured.
-// Default to requiring SSL only in production unless DATABASE_SSL overrides it.
 const useSsl = process.env.DATABASE_SSL
   ? process.env.DATABASE_SSL === "true"
   : process.env.NODE_ENV === "production";
@@ -23,13 +17,9 @@ const sqlClient = postgres(connectionString, {
   ...(schemaName ? { connection: { search_path: schemaName } } : {})
 });
 
-// Initialize Drizzle ORM
 export const db = drizzle(sqlClient, { schema });
 
-/**
- * Initialize database tables
- * Creates tables if they don't exist
- */
+/** Create the database tables and indexes if they do not exist. */
 export async function initDatabase() {
   console.log("🔧 Initializing database...");
 
@@ -37,13 +27,13 @@ export async function initDatabase() {
     await sqlClient`CREATE SCHEMA IF NOT EXISTS ${sqlClient(schemaName)}`;
   }
 
-  // Create businesses table (one row per registered vendor/tenant)
   await db.execute(sql`
     CREATE TABLE IF NOT EXISTS businesses (
       id TEXT PRIMARY KEY,
       name TEXT NOT NULL,
       sector TEXT NOT NULL,
       owner_email TEXT,
+      owner_name TEXT,
       chatbot_enabled INTEGER DEFAULT 1,
       timezone TEXT,
       contact_phone TEXT,
@@ -60,7 +50,6 @@ export async function initDatabase() {
     )
   `);
 
-  // Create messengers table with unique constraint
   await db.execute(sql`
     CREATE TABLE IF NOT EXISTS messengers (
       id SERIAL PRIMARY KEY,
@@ -88,7 +77,6 @@ export async function initDatabase() {
     )
   `);
 
-  // Create chat_messages table with index for faster queries
   await db.execute(sql`
     CREATE TABLE IF NOT EXISTS chat_messages (
       id SERIAL PRIMARY KEY,
@@ -102,7 +90,6 @@ export async function initDatabase() {
     )
   `);
 
-  // Create whatsapp_message_throttle table for outbound notification throttling
   await db.execute(sql`
     CREATE TABLE IF NOT EXISTS whatsapp_message_throttle (
       id SERIAL PRIMARY KEY,
@@ -113,14 +100,14 @@ export async function initDatabase() {
     )
   `);
 
-  // Add the owner-editable profile columns to pre-existing DBs
+  await db.execute(sql`ALTER TABLE businesses ADD COLUMN IF NOT EXISTS owner_name TEXT`);
   await db.execute(sql`ALTER TABLE businesses ADD COLUMN IF NOT EXISTS timezone TEXT`);
   await db.execute(sql`ALTER TABLE businesses ADD COLUMN IF NOT EXISTS contact_phone TEXT`);
   await db.execute(sql`ALTER TABLE businesses ADD COLUMN IF NOT EXISTS address TEXT`);
   await db.execute(sql`ALTER TABLE businesses ADD COLUMN IF NOT EXISTS description TEXT`);
   await db.execute(sql`ALTER TABLE businesses ADD COLUMN IF NOT EXISTS business_hours TEXT`);
+  await db.execute(sql`ALTER TABLE businesses ADD COLUMN IF NOT EXISTS password_hash TEXT`);
 
-  // Add escalation columns to existing DBs safely (Postgres supports IF NOT EXISTS directly)
   await db.execute(sql`ALTER TABLE messengers ADD COLUMN IF NOT EXISTS is_escalated INTEGER DEFAULT 0`);
   await db.execute(sql`ALTER TABLE messengers ADD COLUMN IF NOT EXISTS escalation_status TEXT DEFAULT 'none'`);
   await db.execute(sql`ALTER TABLE messengers ADD COLUMN IF NOT EXISTS claimed_by_agent_id TEXT`);
@@ -130,7 +117,6 @@ export async function initDatabase() {
   await db.execute(sql`ALTER TABLE messengers ADD COLUMN IF NOT EXISTS escalation_tag TEXT`);
   await db.execute(sql`ALTER TABLE messengers ADD COLUMN IF NOT EXISTS escalation_summary TEXT`);
 
-  // Add business_id to pre-existing single-tenant DBs and migrate the unique constraint
   await db.execute(sql`ALTER TABLE messengers ADD COLUMN IF NOT EXISTS business_id TEXT NOT NULL DEFAULT 'biz_default'`);
   await db.execute(sql`ALTER TABLE chat_messages ADD COLUMN IF NOT EXISTS business_id TEXT NOT NULL DEFAULT 'biz_default'`);
   await db.execute(sql`
@@ -142,7 +128,6 @@ export async function initDatabase() {
     END $$;
   `);
 
-  // Create index for faster history queries
   await db.execute(sql`
     CREATE INDEX IF NOT EXISTS idx_chat_messages_messenger
     ON chat_messages(messenger_id, platform, created_at DESC)
@@ -171,5 +156,4 @@ export async function initDatabase() {
   console.log("✅ Database initialized successfully");
 }
 
-// Export schema for use in queries
 export { schema };

@@ -1,17 +1,3 @@
-/**
- * Business-local time handling.
- *
- * Appointments are stored as UTC ISO strings, but customers say "3pm" meaning
- * *their* 3pm. BUSINESS_UTC_OFFSET_MINUTES converts between the two.
- *
- * The defaults (offset 0, 09:00–17:00) preserve the stored-UTC behaviour the
- * availability logic originally assumed. Deployments in a real timezone set
- * them — Sri Lanka is 330 (UTC+05:30).
- *
- * Every value is read from the environment on each call rather than captured at
- * module load, so behaviour never depends on when this module was first
- * imported.
- */
 
 const MINUTE_MS = 60 * 1000;
 
@@ -53,7 +39,6 @@ export function localDateTimeToUtc(date: string, time: string): Date | null {
   );
   if (Number.isNaN(asUtc)) return null;
 
-  // Reject shape-valid but impossible dates such as 2026-02-31.
   if (new Date(asUtc).toISOString().slice(0, 10) !== date) return null;
 
   return new Date(asUtc - businessUtcOffsetMinutes() * MINUTE_MS);
@@ -76,14 +61,6 @@ export function formatLocalTime(instant: Date): string {
   return `${hour12}:${minute} ${suffix}`;
 }
 
-// ---- per-business opening hours -----------------------------------------
-/**
- * Per-business hours are stored on the gateway and fetched by
- * business-hours-provider.ts. Everything below takes an optional resolved
- * window; passing nothing keeps the original global-env behaviour, so a tenant
- * that has never configured hours is unaffected.
- */
-
 export const BUSINESS_DAYS = [
   "sunday",
   "monday",
@@ -104,7 +81,6 @@ export interface DayHours {
 
 export type BusinessHours = Record<BusinessDay, DayHours>;
 
-/** Opening window for one calendar day, in business-local minutes from midnight. */
 export interface DayWindow {
   openMinutes: number;
   closeMinutes: number;
@@ -127,11 +103,7 @@ export function localDateToDay(date: string): BusinessDay | null {
   return BUSINESS_DAYS[new Date(parsed).getUTCDay()];
 }
 
-/**
- * Resolve the opening window for a business-local date.
- * - no configured hours -> the global env window (unchanged behaviour)
- * - configured but closed that day -> null (nothing bookable)
- */
+/** Resolve the opening window for a business-local date. */
 export function resolveDayWindow(
   hours: BusinessHours | null | undefined,
   localDate: string
@@ -151,10 +123,7 @@ export function resolveDayWindow(
   return { openMinutes, closeMinutes };
 }
 
-/**
- * True when the whole appointment falls inside business-local opening hours.
- * `window` defaults to the global env window when omitted.
- */
+/** True when the whole appointment falls inside business-local opening hours. */
 export function isWithinOpeningHours(
   startUtc: Date,
   endUtc: Date,
@@ -166,7 +135,6 @@ export function isWithinOpeningHours(
   const startLocal = new Date(startUtc.getTime() + offset);
   const endLocal = new Date(endUtc.getTime() + offset);
 
-  // An appointment may not straddle midnight or run past closing.
   if (startLocal.toISOString().slice(0, 10) !== endLocal.toISOString().slice(0, 10)) {
     return false;
   }

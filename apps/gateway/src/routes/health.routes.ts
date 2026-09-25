@@ -37,7 +37,6 @@ function ensureHealthUrl(rawUrl: string, fallbackPath: string): string {
     const parsed = new URL(rawUrl);
     const path = parsed.pathname.replace(/\/+$/, "");
 
-    // If caller provided an explicit health endpoint path, keep it as-is.
     if (path.endsWith("/health") || path.endsWith("/analytics/health")) {
       parsed.search = "";
       return parsed.toString();
@@ -47,7 +46,6 @@ function ensureHealthUrl(rawUrl: string, fallbackPath: string): string {
     parsed.search = "";
     return parsed.toString();
   } catch {
-    // Keep original value and let probeHealth classify as down.
     return rawUrl;
   }
 }

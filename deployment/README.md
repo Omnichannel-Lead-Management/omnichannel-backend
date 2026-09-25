@@ -20,7 +20,8 @@ this one.
 | `edge` | 80 / 443 | `nginx:alpine` | — |
 
 Public traffic goes through `edge` only; the per-service host ports are for
-debugging. `notification` is still a stub — it answers 200 and sends nothing.
+debugging. `notification` stores the in-app notification centre and sends
+confirmation email.
 
 ## Call graph
 
@@ -63,11 +64,25 @@ LLM_ROUTING_ENABLED=             # (true)
 TELEGRAM_BOT_TOKEN=
 PUBLIC_BASE_URL=                 # (https://cache.us.kg)
 CORS_ALLOWED_ORIGINS=            # (https://cache.us.kg,http://cache.us.kg)
-AGENT_AUTH_MODE=                 # (none)
+AGENT_AUTH_MODE=                 # (none) agent WebSocket handshake only
+AUTH_JWT_SECRET=                 # REQUIRED — signs dashboard sessions
+AUTH_SESSION_TTL_HOURS=          # (12)
+INTERNAL_SERVICE_TOKEN=          # REQUIRED — sibling services' credential
+NOTIFICATIONS_ENABLED=           # (false) email stays off until this is true
+SMTP_HOST=                       # required when NOTIFICATIONS_ENABLED=true
+SMTP_PORT=
+SMTP_USER=
+SMTP_PASS=
+SMTP_FROM=
 DASHBOARD_BUSINESS_ID=           # also the lead-manager DEFAULT_BUSINESS_ID
 DASHBOARD_BUSINESS_NAME=
 DASHBOARD_BUSINESS_SECTOR=
 DASHBOARD_BUSINESS_EMAIL=
+DASHBOARD_BUSINESS_PROFILE_UPDATE_ENABLED=  # (true) owners edit their profile in Settings
+DASHBOARD_ANALYTICS_ENABLED=     # (true) full reporting from the gateway
+DASHBOARD_NOTIFICATION_CENTER_ENABLED=  # (true) the header bell
+DASHBOARD_WEB_CHAT_ENABLED=      # (true) the embedded web chat widget
+DASHBOARD_IMAGE_ATTACHMENTS_ENABLED=    # (false) needs POCKETBASE_URL on the gateway
 LEAD_INTEGRATION_ENABLED=        # (true) chatbot → lead-manager capture
 AGENT_POOL=                      # (agent_1,agent_2,agent_3) round-robin assignment
 BUSINESS_UTC_OFFSET_MINUTES=     # (0)
@@ -79,6 +94,45 @@ EDGE_CERT_DIR=                   # (./certs)
 > **Docker + Vertex AI:** containers need `GCE_METADATA_HOST=169.254.169.254` so
 > google-auth-library reaches the GCE metadata server by IP — Docker's resolver may
 > not answer `metadata.google.internal`.
+
+## Authentication
+
+`/api/` requires a dashboard session token. The exceptions are `POST /api/auth/login`,
+`POST /api/businesses` (self-service registration), `/api/health*`,
+`/api/messaging/health`, `/api/messaging/receive`, `/webhook/*` and `/ws/*`.
+
+Two credentials are involved, and both are **required** — generate each with
+`openssl rand -hex 32`:
+
+| Variable | Used by | Missing means |
+|---|---|---|
+| `AUTH_JWT_SECRET` | gateway, to sign owner sessions | gateway refuses to start in production |
+| `INTERNAL_SERVICE_TOKEN` | chatbot, lead-manager, appointment → gateway | business lookups 401, so confirmation email loses its recipient |
+
+`AGENT_AUTH_MODE` is unrelated: it guards only the agent WebSocket handshake.
+
+### Giving an existing tenant its first password
+
+Businesses registered before authentication existed have no password and cannot
+be signed into. Set one from the host:
+
+```bash
+cd ~/omnichannel/omnichannel-backend/deployment
+printf '%s' 'the-new-password' | docker compose --env-file .env exec -T gateway \
+  bun run scripts/set-business-password.ts <business-id-or-owner-email>
+```
+
+The owner then signs in at `/login` with their `owner_email` and that password.
+New tenants set their own password at `/register`.
+
+### Deploy order
+
+Turning this on is a breaking change: a dashboard built before this change sends
+no token and every request it makes answers 401. Deploy the **backend and the
+dashboard together**, and set both secrets in `.env` *before* the first deploy —
+they are separate repos with separate CI pipelines, so pushing only one leaves
+the site signed out until the other lands.
+
 
 ## Deploying
 
@@ -122,6 +176,12 @@ curl -s localhost:3003/health
 curl -s localhost:3004/health
 curl -s localhost:3005/health
 curl -s https://cache.us.kg/          # through Cloudflare + edge
+
+# /api/ now needs a session; health endpoints stay open.
+TOKEN=$(curl -s -X POST localhost:3000/api/auth/login \
+  -H 'Content-Type: application/json' \
+  -d '{"owner_email":"owner@example.com","password":"..."}' | jq -r .token)
+curl -s localhost:3000/api/businesses/<id> -H "Authorization: Bearer $TOKEN"
 ```
 
 ## Stop / reset
@@ -144,3 +204,7 @@ real `POSTGRES_PASSWORD` and `AUTHENTICATION_API_KEY`, then set the *same* key a
 
 Note it speaks the unofficial WhatsApp Web protocol (Baileys), which can get numbers
 banned — fine for a demo, a real risk to disclose to a vendor relying on their number.
+
+Appointment confirmation email uses the Compose Gateway and Notification Service
+URLs. Configure the business profile owner email and enable SMTP delivery; see
+[appointment email setup and delivery limitations](../apps/appointment/README.md#appointment-confirmation-email).

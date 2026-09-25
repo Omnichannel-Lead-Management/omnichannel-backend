@@ -4,12 +4,6 @@ import { createDatabase } from "../db/database";
 import { initializeDatabase } from "../db/initialize";
 import { createAppointment } from "../services/appointment-service";
 
-/**
- * Covers the conversational booking path (POST /chat) that the routing service
- * calls. Gemini extraction is mocked so these stay deterministic and offline —
- * the extractor's own contract is that it returns validated fields or nulls.
- */
-
 const BUSINESS_ID = "biz_test_salon";
 
 let db: Database;
@@ -19,7 +13,6 @@ mock.module("../services/booking-parser", () => ({
   extractBookingDetails: async () => extraction
 }));
 
-// Imported after the mock so the route picks up the stub.
 const { createApp } = await import("../app");
 
 /** A date far enough ahead that "already passed" never trips. */

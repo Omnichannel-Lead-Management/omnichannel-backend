@@ -82,6 +82,9 @@ services:
       # Reads the tenant's name/sector/description to give the FAQ matcher
       # business context. Best-effort: unreachable means no extra context.
       GATEWAY_URL: http://gateway:3000
+      # Gateway /api/ routes require a credential; sibling services have no
+      # user session and present this shared token instead.
+      INTERNAL_SERVICE_TOKEN: ${INTERNAL_SERVICE_TOKEN:-}
     volumes:
       - chatbot_data:/data
     healthcheck:
@@ -108,6 +111,8 @@ services:
       NODE_ENV: production
       DATABASE_PATH: /data/leads.db
       NOTIFICATION_SERVICE_URL: http://notification:3004
+      GATEWAY_SERVICE_URL: http://gateway:3000
+      INTERNAL_SERVICE_TOKEN: ${INTERNAL_SERVICE_TOKEN:-}
       # Routing's /chat body carries no business_id yet, so leads created from
       # the lead_qualification intent land on this tenant. Keep it aligned with
       # the business the dashboard is built against.
@@ -130,8 +135,7 @@ services:
       start_period: 20s
 
   # Stores the lead events Lead Manager posts here and serves them back as the
-  # dashboard's in-app notification centre. Email delivery is still a stub — the
-  # POST /api/notifications/email response reports email_sent: false.
+  # dashboard's in-app notification centre. Templated email uses SMTP when enabled.
   notification:
     build: ../apps/notification
     restart: unless-stopped
@@ -141,6 +145,12 @@ services:
       PORT: 3004
       NODE_ENV: production
       DATABASE_PATH: /data/notification.db
+      NOTIFICATIONS_ENABLED: ${NOTIFICATIONS_ENABLED:-false}
+      SMTP_HOST: ${SMTP_HOST:-}
+      SMTP_PORT: ${SMTP_PORT:-}
+      SMTP_USER: ${SMTP_USER:-}
+      SMTP_PASS: ${SMTP_PASS:-}
+      SMTP_FROM: ${SMTP_FROM:-}
     volumes:
       - notification_data:/data
     healthcheck:
@@ -166,6 +176,7 @@ services:
       PORT: 3005
       NODE_ENV: production
       DATABASE_PATH: /data/appointments.db
+      NOTIFICATION_SERVICE_URL: http://notification:3004
       # Gemini pulls the date/time/service out of the customer's message.
       GOOGLE_CLOUD_PROJECT: ${GOOGLE_CLOUD_PROJECT:-}
       GOOGLE_CLOUD_LOCATION: ${GOOGLE_CLOUD_LOCATION:-us-central1}
@@ -179,6 +190,7 @@ services:
       BUSINESS_OPEN_HOUR: ${BUSINESS_OPEN_HOUR:-9}
       BUSINESS_CLOSE_HOUR: ${BUSINESS_CLOSE_HOUR:-17}
       GATEWAY_URL: http://gateway:3000
+      INTERNAL_SERVICE_TOKEN: ${INTERNAL_SERVICE_TOKEN:-}
     volumes:
       - appointment_data:/data
     healthcheck:
@@ -227,6 +239,11 @@ services:
       PUBLIC_BASE_URL: ${PUBLIC_BASE_URL:-https://cache.us.kg}
       CORS_ALLOWED_ORIGINS: ${CORS_ALLOWED_ORIGINS:-https://cache.us.kg,http://cache.us.kg}
       AGENT_AUTH_MODE: ${AGENT_AUTH_MODE:-none}
+      # Dashboard sessions. Without AUTH_JWT_SECRET the gateway refuses to
+      # start in production rather than serving /api/ unauthenticated.
+      AUTH_JWT_SECRET: ${AUTH_JWT_SECRET:-}
+      AUTH_SESSION_TTL_HOURS: ${AUTH_SESSION_TTL_HOURS:-12}
+      INTERNAL_SERVICE_TOKEN: ${INTERNAL_SERVICE_TOKEN:-}
       # Self-hosted WhatsApp. The evolution-api container joins this network from
       # its own compose file (../evolution-api), so the name resolves once that
       # stack is up. Without EVOLUTION_API_KEY the WhatsApp connect endpoints
@@ -264,6 +281,14 @@ services:
         VITE_BUSINESS_NAME: ${DASHBOARD_BUSINESS_NAME:-}
         VITE_BUSINESS_SECTOR: ${DASHBOARD_BUSINESS_SECTOR:-}
         VITE_BUSINESS_EMAIL: ${DASHBOARD_BUSINESS_EMAIL:-}
+        VITE_AGENT_ESCALATION_QUEUE_ENABLED: ${DASHBOARD_AGENT_ESCALATION_QUEUE_ENABLED:-true}
+        VITE_BUSINESS_PROFILE_UPDATE_ENABLED: ${DASHBOARD_BUSINESS_PROFILE_UPDATE_ENABLED:-true}
+        VITE_ANALYTICS_ENABLED: ${DASHBOARD_ANALYTICS_ENABLED:-true}
+        VITE_NOTIFICATION_CENTER_ENABLED: ${DASHBOARD_NOTIFICATION_CENTER_ENABLED:-true}
+        VITE_WEB_CHAT_ENABLED: ${DASHBOARD_WEB_CHAT_ENABLED:-true}
+        # Off until the gateway has POCKETBASE_URL: without storage every
+        # attachment upload answers 503.
+        VITE_IMAGE_ATTACHMENTS_ENABLED: ${DASHBOARD_IMAGE_ATTACHMENTS_ENABLED:-false}
     restart: unless-stopped
     # Keep direct port for debugging; public traffic should use edge :80
     ports:

@@ -5,12 +5,6 @@ import type { ChatResponse } from "../types";
 
 const DEFAULT_BUSINESS_ID = process.env.DEFAULT_BUSINESS_ID ?? "biz_demo_salon";
 
-/**
- * POST /chat — called by the Routing service for the `lead_qualification`
- * intent. We capture/enrich the lead from the message and hand the customer to
- * a human (escalated: true). The routing body carries no business_id yet, so we
- * resolve it from body.business_id then fall back to DEFAULT_BUSINESS_ID.
- */
 export const chatRoutes = new Elysia().post(
   "/chat",
   ({ body, headers }): ChatResponse => {

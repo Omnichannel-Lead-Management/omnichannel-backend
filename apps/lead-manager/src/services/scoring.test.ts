@@ -8,13 +8,13 @@ describe("scoreLead", () => {
       service_interest: "premium haircut package",
       budget_range: "high"
     });
-    expect(score).toBe(65); // 30 + 20 + 15
+    expect(score).toBe(65);
     expect(reasons.length).toBe(3);
   });
 
   test("telegram source with premium keyword (30)", () => {
     const { score } = scoreLead({ source: "telegram", premium_interest: true });
-    expect(score).toBe(30); // 10 + 20
+    expect(score).toBe(30);
   });
 
   test("empty signals score 0", () => {

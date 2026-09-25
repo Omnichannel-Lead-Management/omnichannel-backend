@@ -2,6 +2,7 @@ import { Elysia, t } from "elysia";
 import type { Lead } from "../db/schema";
 import {
   createLead,
+  findLeadByMessenger,
   getLead,
   getActivities,
   listLeads,
@@ -27,10 +28,18 @@ function toDto(lead: Lead) {
 }
 
 export const leadsRoutes = new Elysia({ prefix: "/api/leads" })
-  // Create ----------------------------------------------------------------
   .post(
     "/",
     ({ body, set }) => {
+      // A lead is a person, not a message. The chatbot now captures on every
+      // enquiry it answers, so without this one customer asking three
+      // questions would become three leads.
+      const existing = findLeadByMessenger(body.business_id, body.messenger_id);
+      if (existing) {
+        set.status = 200;
+        return { success: true, lead: toDto(existing), deduplicated: true };
+      }
+
       const lead = createLead(body);
       set.status = 201;
       return { success: true, lead: toDto(lead) };
@@ -54,7 +63,6 @@ export const leadsRoutes = new Elysia({ prefix: "/api/leads" })
     }
   )
 
-  // Real-time stream (SSE) — declared before "/:id" so it isn't shadowed ---
   .get(
     "/stream",
     ({ query }) => {
@@ -76,14 +84,12 @@ export const leadsRoutes = new Elysia({ prefix: "/api/leads" })
                 )
               );
             } catch {
-              /* stream already closed */
             }
           });
           heartbeat = setInterval(() => {
             try {
               controller.enqueue(encoder.encode(`: ping\n\n`));
             } catch {
-              /* closed */
             }
           }, 25000);
         },
@@ -108,7 +114,6 @@ export const leadsRoutes = new Elysia({ prefix: "/api/leads" })
     }
   )
 
-  // List ------------------------------------------------------------------
   .get(
     "/",
     ({ query }) => {
@@ -128,7 +133,6 @@ export const leadsRoutes = new Elysia({ prefix: "/api/leads" })
     }
   )
 
-  // Detail (+ activities) -------------------------------------------------
   .get(
     "/:id",
     ({ params, query, set }) => {
@@ -150,7 +154,6 @@ export const leadsRoutes = new Elysia({ prefix: "/api/leads" })
     }
   )
 
-  // Update ----------------------------------------------------------------
   .patch(
     "/:id",
     ({ params, body, set }) => {
@@ -178,7 +181,6 @@ export const leadsRoutes = new Elysia({ prefix: "/api/leads" })
     }
   )
 
-  // Assign (explicit agent, or auto round-robin) --------------------------
   .post(
     "/:id/assign",
     ({ params, body, set }) => {
