@@ -57,12 +57,22 @@ services:
       PORT: 3003
       NODE_ENV: production
       DATABASE_PATH: /data/chatbot.db
+      # Keep the demo widget and FAQ editor on the tenant the dashboard reads.
+      DEFAULT_BUSINESS_ID: ${DASHBOARD_BUSINESS_ID:-biz_demo_salon}
       # Lead Manager is deployed now, so chatbot conversations can capture leads.
       # leadClient is best-effort (timeout-guarded, returns null) — if lead-manager
       # is down the customer still gets their reply.
       LEAD_INTEGRATION_ENABLED: ${LEAD_INTEGRATION_ENABLED:-true}
       LEAD_MANAGER_URL: http://lead-manager:3002
-      APPOINTMENT_INTEGRATION_ENABLED: "false"
+      # Appointment service is deployed now, so the chatbot can make real
+      # bookings through it (POST /chat) instead of only capturing the request.
+      # Best-effort: if it is unreachable the customer is handed to a human.
+      APPOINTMENT_INTEGRATION_ENABLED: ${APPOINTMENT_INTEGRATION_ENABLED:-true}
+      APPOINTMENT_SERVICE_URL: http://appointment:3005
+      # The chatbot resolves "9.30am on tuesday" itself and books over REST, so
+      # it must read the clock exactly like the appointment service does.
+      BUSINESS_UTC_OFFSET_MINUTES: ${BUSINESS_UTC_OFFSET_MINUTES:-0}
+      APPOINTMENT_DURATION_MINUTES: ${APPOINTMENT_DEFAULT_MINUTES:-30}
       GOOGLE_CLOUD_PROJECT: ${GOOGLE_CLOUD_PROJECT:-}
       GOOGLE_CLOUD_LOCATION: ${GOOGLE_CLOUD_LOCATION:-us-central1}
       GCE_METADATA_HOST: ${GCE_METADATA_HOST:-}
