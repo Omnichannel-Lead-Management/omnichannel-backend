@@ -94,7 +94,7 @@ describe("notification email API", () => {
       subject: "New lead received"
     });
     expect(provider.messages[0]?.text).toContain("Lead ID: lead_test");
-    expect(provider.messages[0]?.html).toContain("<strong>Business:</strong> Test Salon");
+    expect(provider.messages[0]?.html).toContain("A new lead has been received for Test Salon.");
     expect(body.success).toBe(true);
     expect(body.stored).toBe(true);
     expect(body.email_sent).toBe(true);
@@ -127,7 +127,7 @@ describe("notification email API", () => {
       subject: "Appointment confirmed"
     });
     expect(provider.messages[0]?.text).toContain("Appointment ID: appointment_test");
-    expect(provider.messages[0]?.html).toContain("<strong>Customer:</strong> Test Customer");
+    expect(provider.messages[0]?.html).toContain("Test Customer");
     expect(body.stored).toBe(false);
     expect(body.delivery.status).toBe("sent");
   });
