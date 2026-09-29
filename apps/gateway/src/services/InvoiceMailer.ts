@@ -67,7 +67,11 @@ export async function sendInvoiceEmail(
       | { success?: boolean; email_sent?: boolean; error?: string; message?: string }
       | null;
 
-    if (res.ok && body?.email_sent) return { sent: true };
+    // `email_sent` is the authoritative signal, not the status code. The
+    // notification service answers 500 when the mail went out but recording it
+    // afterwards failed; reading that as "not sent" would have an admin resend
+    // and bill the customer's inbox twice.
+    if (body?.email_sent) return { sent: true };
 
     if (res.status === 503) {
       return {
@@ -78,9 +82,11 @@ export async function sendInvoiceEmail(
       };
     }
 
+    // `message` is the human-readable reason; `error` is a provider code like
+    // SMTP_DELIVERY_FAILED. Admins read this text, so prefer the sentence.
     return {
       sent: false,
-      error: body?.error || body?.message || `Notification service responded ${res.status}`
+      error: body?.message || body?.error || `Notification service responded ${res.status}`
     };
   } catch (err) {
     return {
