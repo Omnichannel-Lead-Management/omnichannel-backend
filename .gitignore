@@ -6,3 +6,8 @@ dist/
 data/
 *.log
 /docs/testing_report_nofitication.md
+/docs/test-plan-inspection.md
+/docs/test-execution-report.md
+/docs/test-execution-evidence/
+/docs/integration-test-inspection.md
+/docs/specialized-test-results.md

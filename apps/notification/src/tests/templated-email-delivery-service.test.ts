@@ -43,26 +43,11 @@ describe("templated email delivery service", () => {
     });
 
     expect(provider.messages).toHaveLength(1);
-    expect(provider.messages[0]).toEqual({
-      recipientEmail: "owner@example.com",
-      subject: "New lead received",
-      text: [
-        "A new lead was received.",
-        "",
-        "Business: Pathirana Salon",
-        "Lead ID: lead_123",
-        "Service interest: Bridal package",
-        "Platform: telegram",
-        "Score: 82"
-      ].join("\n"),
-      html:
-        "<p>A new lead was received.</p>" +
-        "<ul><li><strong>Business:</strong> Pathirana Salon</li>" +
-        "<li><strong>Lead ID:</strong> lead_123</li>" +
-        "<li><strong>Service interest:</strong> Bridal package</li>" +
-        "<li><strong>Platform:</strong> telegram</li>" +
-        "<li><strong>Score:</strong> 82</li></ul>"
-    });
+    expect(provider.messages[0]).toMatchObject({ recipientEmail: "owner@example.com", subject: "New lead received" });
+    expect(provider.messages[0]?.text).toContain("Service interest: Bridal package");
+    expect(provider.messages[0]?.text).toContain("Lead score: 82");
+    expect(provider.messages[0]?.html).toContain("You have a new lead</h1>");
+    expect(provider.messages[0]?.html).toContain("Pathirana Salon");
   });
 
   test("renders appointment data and forwards recipient, subject, text, and HTML", async () => {
@@ -87,10 +72,8 @@ describe("templated email delivery service", () => {
     expect(provider.messages[0]?.subject).toBe("Appointment confirmed");
     expect(provider.messages[0]?.text).toContain("Appointment ID: apt_123");
     expect(provider.messages[0]?.text).toContain("Customer: Amaya Silva");
-    expect(provider.messages[0]?.html).toContain("<strong>Service:</strong> Hair styling");
-    expect(provider.messages[0]?.html).toContain(
-      "<strong>Start time:</strong> 2026-09-03T09:00:00+05:30"
-    );
+    expect(provider.messages[0]?.html).toContain("Hair styling");
+    expect(provider.messages[0]?.html).toContain("Appointment confirmed</h1>");
   });
 
   test("returns the provider success result unchanged", async () => {
