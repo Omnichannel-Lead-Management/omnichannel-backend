@@ -67,6 +67,9 @@ CORS_ALLOWED_ORIGINS=            # (https://cache.us.kg,http://cache.us.kg)
 AGENT_AUTH_MODE=                 # (none) agent WebSocket handshake only
 AUTH_JWT_SECRET=                 # REQUIRED — signs dashboard sessions
 AUTH_SESSION_TTL_HOURS=          # (12)
+ADMIN_JWT_SECRET=                # signs platform-admin sessions; unset = console off
+ADMIN_SESSION_TTL_HOURS=         # (8)
+ANALYTICS_CURRENCY=              # (LKR) currency of the seeded rate card
 INTERNAL_SERVICE_TOKEN=          # REQUIRED — sibling services' credential
 NOTIFICATIONS_ENABLED=           # (false) email stays off until this is true
 SMTP_HOST=                       # required when NOTIFICATIONS_ENABLED=true
@@ -108,6 +111,7 @@ Two credentials are involved, and both are **required** — generate each with
 |---|---|---|
 | `AUTH_JWT_SECRET` | gateway, to sign owner sessions | gateway refuses to start in production |
 | `INTERNAL_SERVICE_TOKEN` | chatbot, lead-manager, appointment → gateway | business lookups 401, so confirmation email loses its recipient |
+| `ADMIN_JWT_SECRET` | gateway, to sign platform-admin sessions | `/api/admin/` answers 503; the rest of the gateway is unaffected |
 
 `AGENT_AUTH_MODE` is unrelated: it guards only the agent WebSocket handshake.
 
@@ -124,6 +128,56 @@ printf '%s' 'the-new-password' | docker compose --env-file .env exec -T gateway 
 
 The owner then signs in at `/login` with their `owner_email` and that password.
 New tenants set their own password at `/register`.
+
+## The platform admin console
+
+`/admin` is a second, separate console for the people who run the platform — it
+reports usage per tenant and issues invoices. It is **not** a super-user view of
+the dashboard:
+
+- Admins live in their own `platform_admins` table, sign in at
+  `POST /api/admin/auth/login`, and carry a token signed with `ADMIN_JWT_SECRET`
+  under a different issuer than tenant sessions.
+- An admin token is refused on every route outside `/api/admin/`, so platform
+  staff cannot open a tenant's inbox, leads or notifications. Admin endpoints
+  return counts only — no message text passes through them.
+- A tenant token is refused on every `/api/admin/` route.
+
+Set `ADMIN_JWT_SECRET` with `openssl rand -hex 32`. Leaving it unset disables the
+console rather than opening it.
+
+### Creating the first admin
+
+There is no public admin registration — it would be a hole straight into every
+tenant's usage data. The first account is created on the host:
+
+```bash
+cd ~/omnichannel/omnichannel-backend/deployment
+printf '%s' 'the-password' | docker compose --env-file .env exec -T gateway \
+  bun run scripts/create-platform-admin.ts admin@example.com --owner --name "Ops"
+```
+
+`--owner` may manage other admins; without it the account is a billing admin.
+Re-running for an existing email resets that admin's password. They then sign in
+at `/admin/login`.
+
+### Metering and billing
+
+The gateway records one `usage_events` row per AI operation it performs for a
+tenant — a chatbot reply, a voice transcription, a photo read. Conversations,
+messages and contacts are counted from the existing tables, not logged.
+
+Rate cards live in `pricing_plans`; a tenant is billed on its own plan, or on
+the plan flagged `is_default` if it has none. The gateway seeds one "Standard"
+plan on first boot and never re-seeds it, so prices an admin edits survive
+restarts. Invoices store their own totals, plan name and usage snapshot, so a
+later price change cannot rewrite a bill that has already been sent.
+
+Sending an invoice emails it through the notification service **and** publishes
+it on the tenant's own `/billing` page. Those two are independent: with
+`NOTIFICATIONS_ENABLED=false` (the current default) the email fails, the invoice
+is still issued, and the failure reason is stored on the invoice and shown in
+the console.
 
 ### Deploy order
 

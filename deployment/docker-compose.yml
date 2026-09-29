@@ -245,6 +245,14 @@ services:
       # start in production rather than serving /api/ unauthenticated.
       AUTH_JWT_SECRET: ${AUTH_JWT_SECRET:-}
       AUTH_SESSION_TTL_HOURS: ${AUTH_SESSION_TTL_HOURS:-12}
+      # Platform admin console (/admin). Its own secret, deliberately: a leak
+      # of the tenant secret above must not also mint admin sessions. Leave it
+      # unset and /api/admin/ answers 503 while the rest of the gateway runs
+      # normally.
+      ADMIN_JWT_SECRET: ${ADMIN_JWT_SECRET:-}
+      ADMIN_SESSION_TTL_HOURS: ${ADMIN_SESSION_TTL_HOURS:-8}
+      # Currency the seeded rate card and analytics are denominated in.
+      ANALYTICS_CURRENCY: ${ANALYTICS_CURRENCY:-LKR}
       INTERNAL_SERVICE_TOKEN: ${INTERNAL_SERVICE_TOKEN:-}
       # Self-hosted WhatsApp. The evolution-api container joins this network from
       # its own compose file (../evolution-api), so the name resolves once that

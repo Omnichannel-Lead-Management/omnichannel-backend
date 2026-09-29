@@ -14,6 +14,7 @@ import {
   photoMessageText,
   voiceMessageText
 } from "../services/MediaUnderstanding";
+import { meter } from "../services/UsageMeter";
 import { getBusinessById } from "../services/BusinessRegistry";
 
 const telegramAdapter = new TelegramAdapter();
@@ -70,6 +71,15 @@ async function processTelegramMessageAsync(
         }
 
         const understanding = await describeCustomerImage(fileData.data, fileData.mimeType, sector);
+        // Billed only when Gemini actually returned something usable: a
+        // customer should not be charged for an AI call that produced nothing.
+        if (understanding) {
+          meter({
+            business_id: mutableMessage.business_id as string | undefined,
+            kind: "ai_vision",
+            metadata: { platform: "telegram" }
+          });
+        }
         mutableMessage.message = photoMessageText(understanding, mutableMessage._caption);
         mutableMessage.metadata = { ...(mutableMessage.metadata ?? {}), type: "photo" };
 
@@ -91,6 +101,13 @@ async function processTelegramMessageAsync(
       const fileData = await adapter.downloadFile(mutableMessage._audio_file_id, correlationId);
       if (fileData) {
         const transcript = await transcribeVoice(fileData.data, fileData.mimeType);
+        if (transcript) {
+          meter({
+            business_id: mutableMessage.business_id as string | undefined,
+            kind: "ai_voice",
+            metadata: { platform: "telegram" }
+          });
+        }
         mutableMessage.message = voiceMessageText(transcript, mutableMessage._caption);
         mutableMessage.metadata = { ...(mutableMessage.metadata ?? {}), type: "voice" };
 

@@ -14,6 +14,7 @@ import {
   photoMessageText,
   voiceMessageText
 } from "../services/MediaUnderstanding";
+import { meter } from "../services/UsageMeter";
 import { getBusinessById } from "../services/BusinessRegistry";
 
 type OrchestratorInput = Parameters<typeof messageOrchestrator.processIncomingMessage>[0];
@@ -65,6 +66,9 @@ async function resolveEvolutionMedia(
       const understanding = file
         ? await describeCustomerImage(file.data, file.mimeType, business.sector ?? undefined)
         : null;
+      if (understanding) {
+        meter({ business_id: business.id, kind: "ai_vision", metadata: { platform: "whatsapp" } });
+      }
       message.message = photoMessageText(understanding, message._caption);
       message.metadata = { ...(message.metadata ?? {}), type: "photo" };
       logWithCorrelation(
@@ -75,6 +79,9 @@ async function resolveEvolutionMedia(
       );
     } else if (kind === "voice") {
       const transcript = file ? await transcribeVoice(file.data, file.mimeType) : null;
+      if (transcript) {
+        meter({ business_id: business.id, kind: "ai_voice", metadata: { platform: "whatsapp" } });
+      }
       message.message = voiceMessageText(transcript, message._caption);
       message.metadata = { ...(message.metadata ?? {}), type: "voice" };
       logWithCorrelation(

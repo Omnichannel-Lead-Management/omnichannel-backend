@@ -11,6 +11,7 @@ import {
 import type { AgentMessage, IncomingMessage, AIRequestPayload, ChatHistoryEntry, PlatformCapabilities } from "../platforms/PlatformAdapter";
 import { agentHub } from "./AgentHub";
 import { transcribeAudio, synthesizeSpeech } from "./VoiceService";
+import { meter } from "./UsageMeter";
 
 function interactiveToText(msg: Extract<AgentMessage, { type: "interactive" }>): string {
   let text = msg.text;
@@ -980,6 +981,22 @@ export class MessageOrchestrator {
         routing?: { intent?: string; summary?: string };
         error?: string;
       };
+
+      // One AI request per inbound message the routing agent answered. What it
+      // does downstream — intent routing, FAQ matching, a flow step — is one
+      // billable unit here, so the tenant's bill matches a count they can see
+      // in their own inbox rather than an internal fan-out they cannot.
+      if (result.success) {
+        meter({
+          business_id: payload.business_id,
+          kind: "ai_reply",
+          metadata: {
+            platform: payload.platform,
+            intent: result.routing?.intent ?? null,
+            escalated: Boolean(result.escalated)
+          }
+        });
+      }
 
       if (!result.success) {
         logWithCorrelation(

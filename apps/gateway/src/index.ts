@@ -19,8 +19,12 @@ import { chatbotProxyRoutes } from "./routes/chatbot.proxy.routes";
 import { notificationsProxyRoutes } from "./routes/notifications.proxy.routes";
 import { healthRoutes } from "./routes/health.routes";
 import { authRoutes } from "./routes/auth.routes";
+import { adminRoutes } from "./routes/admin.routes";
+import { billingRoutes } from "./routes/billing.routes";
 import { authorize } from "./middleware/requireAuth";
 import { sessionAuthService } from "./services/SessionAuth";
+import { adminAuthService } from "./services/AdminAuth";
+import { countAdmins } from "./services/AdminRegistry";
 import {
   describeAllowedCorsOrigins,
   getAllowedCorsOrigins,
@@ -55,6 +59,16 @@ async function init() {
     console.log("🔐 Dashboard session authentication enabled");
   }
 
+  // The admin console is optional infrastructure: without its own secret the
+  // `/api/admin/` routes answer 503 and the rest of the gateway is unaffected.
+  if (!adminAuthService.configured) {
+    console.warn(
+      "⚠️  ADMIN_JWT_SECRET is not set — the platform admin console is disabled."
+    );
+  } else {
+    console.log("🛡️  Platform admin console enabled");
+  }
+
   if (!process.env.INTERNAL_SERVICE_TOKEN?.trim()) {
     console.warn(
       "⚠️  INTERNAL_SERVICE_TOKEN is not set — chatbot, lead-manager and appointment " +
@@ -63,6 +77,13 @@ async function init() {
   }
 
   await initDatabase();
+
+  if (adminAuthService.configured && (await countAdmins()) === 0) {
+    console.warn(
+      "⚠️  No platform admin exists yet. Create one with: " +
+        "bun run scripts/create-platform-admin.ts <email> --owner"
+    );
+  }
 
   await initializePlatforms();
 
@@ -106,6 +127,9 @@ const app = new Elysia()
       businesses: "POST /api/businesses",
       login: "POST /api/auth/login",
       session: "GET /api/auth/me",
+      billing: "GET /api/businesses/:id/billing",
+      admin_login: "POST /api/admin/auth/login",
+      admin_overview: "GET /api/admin/overview",
       telegram_webhook: "POST /webhook/telegram",
       telegram_webhook_multi_tenant: "POST /webhook/telegram/:business_id",
       whatsapp_webhook: "POST /webhook/whatsapp",
@@ -126,6 +150,7 @@ const app = new Elysia()
     return { success: false, error: decision.error ?? "Authentication required" };
   })
   .use(authRoutes)
+  .use(adminRoutes)
   .use(messagingRoutes)
   .use(uploadRoutes)
   .use(agentsRoutes)
@@ -133,6 +158,7 @@ const app = new Elysia()
   .use(appointmentsProxyRoutes)
   .use(chatbotProxyRoutes)
   .use(notificationsProxyRoutes)
+  .use(billingRoutes)
   .use(businessesRoutes)
   .use(healthRoutes)
   .use(telegramRoutes)

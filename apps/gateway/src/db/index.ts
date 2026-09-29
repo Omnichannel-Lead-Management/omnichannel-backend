@@ -100,6 +100,96 @@ export async function initDatabase() {
     )
   `);
 
+  await db.execute(sql`
+    CREATE TABLE IF NOT EXISTS platform_admins (
+      id TEXT PRIMARY KEY,
+      email TEXT NOT NULL UNIQUE,
+      name TEXT,
+      password_hash TEXT NOT NULL,
+      role TEXT NOT NULL DEFAULT 'staff',
+      is_active INTEGER NOT NULL DEFAULT 1,
+      last_login_at TEXT,
+      created_at TEXT,
+      updated_at TEXT
+    )
+  `);
+
+  await db.execute(sql`
+    CREATE TABLE IF NOT EXISTS usage_events (
+      id SERIAL PRIMARY KEY,
+      business_id TEXT NOT NULL,
+      kind TEXT NOT NULL,
+      units INTEGER NOT NULL DEFAULT 1,
+      model TEXT,
+      metadata TEXT,
+      occurred_at TEXT NOT NULL,
+      created_at TEXT
+    )
+  `);
+
+  await db.execute(sql`
+    CREATE TABLE IF NOT EXISTS pricing_plans (
+      id TEXT PRIMARY KEY,
+      name TEXT NOT NULL,
+      description TEXT,
+      currency TEXT NOT NULL DEFAULT 'LKR',
+      monthly_fee DOUBLE PRECISION NOT NULL DEFAULT 0,
+      included_ai_requests INTEGER NOT NULL DEFAULT 0,
+      price_per_ai_request DOUBLE PRECISION NOT NULL DEFAULT 0,
+      included_conversations INTEGER NOT NULL DEFAULT 0,
+      price_per_conversation DOUBLE PRECISION NOT NULL DEFAULT 0,
+      included_messages INTEGER NOT NULL DEFAULT 0,
+      price_per_message DOUBLE PRECISION NOT NULL DEFAULT 0,
+      tax_percent DOUBLE PRECISION NOT NULL DEFAULT 0,
+      is_default INTEGER NOT NULL DEFAULT 0,
+      archived INTEGER NOT NULL DEFAULT 0,
+      created_at TEXT,
+      updated_at TEXT
+    )
+  `);
+
+  await db.execute(sql`
+    CREATE TABLE IF NOT EXISTS invoices (
+      id TEXT PRIMARY KEY,
+      number TEXT NOT NULL UNIQUE,
+      business_id TEXT NOT NULL,
+      pricing_plan_id TEXT,
+      plan_name TEXT,
+      status TEXT NOT NULL DEFAULT 'draft',
+      currency TEXT NOT NULL DEFAULT 'LKR',
+      period_start TEXT NOT NULL,
+      period_end TEXT NOT NULL,
+      subtotal DOUBLE PRECISION NOT NULL DEFAULT 0,
+      tax_percent DOUBLE PRECISION NOT NULL DEFAULT 0,
+      tax DOUBLE PRECISION NOT NULL DEFAULT 0,
+      total DOUBLE PRECISION NOT NULL DEFAULT 0,
+      notes TEXT,
+      usage_json TEXT,
+      issued_at TEXT,
+      due_date TEXT,
+      sent_at TEXT,
+      send_error TEXT,
+      paid_at TEXT,
+      voided_at TEXT,
+      created_by TEXT,
+      created_at TEXT,
+      updated_at TEXT
+    )
+  `);
+
+  await db.execute(sql`
+    CREATE TABLE IF NOT EXISTS invoice_line_items (
+      id SERIAL PRIMARY KEY,
+      invoice_id TEXT NOT NULL,
+      kind TEXT NOT NULL,
+      description TEXT NOT NULL,
+      quantity DOUBLE PRECISION NOT NULL DEFAULT 0,
+      unit_price DOUBLE PRECISION NOT NULL DEFAULT 0,
+      amount DOUBLE PRECISION NOT NULL DEFAULT 0,
+      sort_order INTEGER NOT NULL DEFAULT 0
+    )
+  `);
+
   await db.execute(sql`ALTER TABLE businesses ADD COLUMN IF NOT EXISTS owner_name TEXT`);
   await db.execute(sql`ALTER TABLE businesses ADD COLUMN IF NOT EXISTS timezone TEXT`);
   await db.execute(sql`ALTER TABLE businesses ADD COLUMN IF NOT EXISTS contact_phone TEXT`);
@@ -107,6 +197,8 @@ export async function initDatabase() {
   await db.execute(sql`ALTER TABLE businesses ADD COLUMN IF NOT EXISTS description TEXT`);
   await db.execute(sql`ALTER TABLE businesses ADD COLUMN IF NOT EXISTS business_hours TEXT`);
   await db.execute(sql`ALTER TABLE businesses ADD COLUMN IF NOT EXISTS password_hash TEXT`);
+  await db.execute(sql`ALTER TABLE businesses ADD COLUMN IF NOT EXISTS pricing_plan_id TEXT`);
+  await db.execute(sql`ALTER TABLE businesses ADD COLUMN IF NOT EXISTS billing_active INTEGER DEFAULT 1`);
 
   await db.execute(sql`ALTER TABLE messengers ADD COLUMN IF NOT EXISTS is_escalated INTEGER DEFAULT 0`);
   await db.execute(sql`ALTER TABLE messengers ADD COLUMN IF NOT EXISTS escalation_status TEXT DEFAULT 'none'`);
@@ -153,7 +245,53 @@ export async function initDatabase() {
     ON whatsapp_message_throttle(recipient)
   `);
 
+  await db.execute(sql`
+    CREATE INDEX IF NOT EXISTS idx_usage_events_business
+    ON usage_events(business_id, occurred_at)
+  `);
+
+  await db.execute(sql`
+    CREATE INDEX IF NOT EXISTS idx_invoices_business
+    ON invoices(business_id, period_start)
+  `);
+
+  await db.execute(sql`
+    CREATE INDEX IF NOT EXISTS idx_invoice_items_invoice
+    ON invoice_line_items(invoice_id)
+  `);
+
+  await ensureDefaultPricingPlan();
+
   console.log("✅ Database initialized successfully");
+}
+
+/**
+ * Every tenant has to be billable on day one, so the platform ships with one
+ * rate card. Inserted only when no plan exists at all — never re-seeded, so an
+ * admin who edited the prices does not get them reset by a restart.
+ */
+async function ensureDefaultPricingPlan(): Promise<void> {
+  const existing = await db.execute(sql`SELECT 1 FROM pricing_plans LIMIT 1`);
+  if (existing.length > 0) return;
+
+  const now = new Date().toISOString();
+  await db.execute(sql`
+    INSERT INTO pricing_plans (
+      id, name, description, currency, monthly_fee,
+      included_ai_requests, price_per_ai_request,
+      included_conversations, price_per_conversation,
+      included_messages, price_per_message,
+      tax_percent, is_default, archived, created_at, updated_at
+    ) VALUES (
+      'plan_standard', 'Standard', 'Default rate card applied to new tenants.',
+      ${process.env.ANALYTICS_CURRENCY ?? "LKR"}, 2500,
+      500, 4,
+      100, 25,
+      2000, 0.5,
+      0, 1, 0, ${now}, ${now}
+    )
+  `);
+  console.log("💳 Seeded the default pricing plan");
 }
 
 export { schema };

@@ -3,7 +3,11 @@ import type { Database } from "bun:sqlite";
 export const EMAIL_DELIVERY_STATUSES = ["pending", "sent", "failed"] as const;
 export type EmailDeliveryStatus = (typeof EMAIL_DELIVERY_STATUSES)[number];
 
-export const EMAIL_DELIVERY_TEMPLATES = ["new_lead", "appointment_confirmed"] as const;
+export const EMAIL_DELIVERY_TEMPLATES = [
+  "new_lead",
+  "appointment_confirmed",
+  "invoice_issued"
+] as const;
 export type EmailDeliveryTemplate = (typeof EMAIL_DELIVERY_TEMPLATES)[number];
 
 export interface EmailDeliveryRecord {

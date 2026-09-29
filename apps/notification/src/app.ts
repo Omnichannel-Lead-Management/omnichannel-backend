@@ -10,6 +10,8 @@ import type { SendTemplatedEmailInput } from "./email/services";
 import type {
   AppointmentConfirmedTemplateData,
   EmailTemplateInput,
+  InvoiceIssuedTemplateData,
+  InvoiceLineItemData,
   NewLeadTemplateData
 } from "./email/templates";
 import {
@@ -126,17 +128,73 @@ function parseAppointmentData(
   return values;
 }
 
+/** Line items are display-only, so anything malformed is dropped, not rejected. */
+function parseInvoiceLineItems(value: unknown): InvoiceLineItemData[] {
+  if (!Array.isArray(value)) return [];
+
+  return value.flatMap((entry) => {
+    if (!isRecord(entry)) return [];
+    const description = typeof entry.description === "string" ? entry.description.trim() : "";
+    const quantity = typeof entry.quantity === "number" ? entry.quantity : 0;
+    const amount = typeof entry.amount === "number" ? entry.amount : 0;
+    if (!description) return [];
+    return [{ description, quantity, amount }];
+  });
+}
+
+function parseInvoiceData(data: Record<string, unknown>): InvoiceIssuedTemplateData | string {
+  const fields = ["invoice_number", "business_name", "period_start", "period_end"] as const;
+  const values: Record<(typeof fields)[number], string> = {
+    invoice_number: "",
+    business_name: "",
+    period_start: "",
+    period_end: ""
+  };
+
+  for (const field of fields) {
+    const parsed = requiredString(data, field);
+    if ("error" in parsed) return parsed.error;
+    values[field] = parsed.value;
+  }
+
+  if (typeof data.total !== "number" || !Number.isFinite(data.total)) {
+    return "total must be a number";
+  }
+  const currency = typeof data.currency === "string" && data.currency.trim() ? data.currency.trim() : "";
+  if (!currency) return "currency is required";
+
+  const dueDate = optionalStringOrNull(data, "due_date");
+  if ("error" in dueDate) return dueDate.error;
+
+  return {
+    ...values,
+    currency,
+    total: data.total,
+    ...(dueDate.value === undefined ? {} : { due_date: dueDate.value }),
+    line_items: parseInvoiceLineItems(data.line_items)
+  };
+}
+
 function parseTemplateInput(
   payload: Record<string, unknown>
 ): EmailTemplateInput | string {
-  if (payload.template !== "new_lead" && payload.template !== "appointment_confirmed") {
-    return "template must be new_lead or appointment_confirmed";
+  if (
+    payload.template !== "new_lead" &&
+    payload.template !== "appointment_confirmed" &&
+    payload.template !== "invoice_issued"
+  ) {
+    return "template must be new_lead, appointment_confirmed or invoice_issued";
   }
   if (!isRecord(payload.data)) return "data is required";
 
   if (payload.template === "new_lead") {
     const data = parseNewLeadData(payload.data);
     return typeof data === "string" ? data : { template: "new_lead", data };
+  }
+
+  if (payload.template === "invoice_issued") {
+    const data = parseInvoiceData(payload.data);
+    return typeof data === "string" ? data : { template: "invoice_issued", data };
   }
 
   const data = parseAppointmentData(payload.data);
@@ -233,8 +291,12 @@ export function createApp(
               : payload;
           const event = fromLeadEvent(eventPayload);
           if (!event) {
-            if (templateInput?.template === "appointment_confirmed") {
-              // Appointment emails do not create lead-shaped in-app notifications.
+            if (
+              templateInput?.template === "appointment_confirmed" ||
+              templateInput?.template === "invoice_issued"
+            ) {
+              // Neither appointment nor invoice emails create lead-shaped
+              // in-app notifications; they are delivered as email only.
             } else {
               set.status = 202;
               return {

@@ -15,9 +15,27 @@ export interface AppointmentConfirmedTemplateData {
   end_time: string;
 }
 
+export interface InvoiceLineItemData {
+  description: string;
+  quantity: number;
+  amount: number;
+}
+
+export interface InvoiceIssuedTemplateData {
+  invoice_number: string;
+  business_name: string;
+  period_start: string;
+  period_end: string;
+  currency: string;
+  total: number;
+  due_date?: string | null;
+  line_items?: InvoiceLineItemData[];
+}
+
 export type EmailTemplateInput =
   | { template: "new_lead"; data: NewLeadTemplateData }
-  | { template: "appointment_confirmed"; data: AppointmentConfirmedTemplateData };
+  | { template: "appointment_confirmed"; data: AppointmentConfirmedTemplateData }
+  | { template: "invoice_issued"; data: InvoiceIssuedTemplateData };
 
 export interface RenderedEmail {
   subject: string;
@@ -125,10 +143,42 @@ function renderAppointmentConfirmed(data: AppointmentConfirmedTemplateData): Ren
   return { subject: "Appointment confirmed", text: renderText(heading, introduction, details, action), html: renderLayout(heading, introduction, details, action) };
 }
 
+function money(amount: number, currency: string): string {
+  return `${currency} ${amount.toFixed(2)}`;
+}
+
+function renderInvoiceIssued(data: InvoiceIssuedTemplateData): RenderedEmail {
+  const heading = `Invoice ${data.invoice_number}`;
+  const introduction =
+    `Your invoice for ${data.business_name} covering ${data.period_start} to ` +
+    `${data.period_end} is ready.`;
+
+  // Each billed line is its own detail row: a usage-priced bill is only
+  // trustworthy if the customer can see what produced the number.
+  const details: Detail[] = (data.line_items ?? []).map((line) => [
+    line.description,
+    money(line.amount, data.currency)
+  ]);
+
+  details.push(["Amount due", money(data.total, data.currency)]);
+  if (data.due_date) details.push(["Due date", data.due_date]);
+  details.push(["Invoice ID", data.invoice_number]);
+
+  const url = dashboardUrl("/billing");
+  const action = url ? { url, label: "View billing" } : null;
+
+  return {
+    subject: `Invoice ${data.invoice_number} is ready`,
+    text: renderText(heading, introduction, details, action),
+    html: renderLayout(heading, introduction, details, action)
+  };
+}
+
 export function renderEmailTemplate(input: EmailTemplateInput): RenderedEmail {
   switch (input.template) {
     case "new_lead": return renderNewLead(input.data);
     case "appointment_confirmed": return renderAppointmentConfirmed(input.data);
+    case "invoice_issued": return renderInvoiceIssued(input.data);
     default: throw new Error("Unsupported email template");
   }
 }

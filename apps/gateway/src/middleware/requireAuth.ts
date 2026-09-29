@@ -10,8 +10,19 @@
  *    `/api/businesses/:id` over the Docker network with no user session, so
  *    they present INTERNAL_SERVICE_TOKEN instead. Without this the confirmation
  *    -email recipient lookup breaks the moment auth is switched on.
+ *
+ * `/api/admin/` is the platform console and is gated separately, on an admin
+ * session. The separation runs both ways and is the whole security property of
+ * the admin side:
+ *
+ *  - a business-owner token is refused on every admin route, so a tenant
+ *    cannot read the platform's books or other tenants' volumes;
+ *  - an admin token is refused on every non-admin route, so platform staff
+ *    cannot reach `/api/businesses/:id/conversations` or any other endpoint
+ *    that would show them a customer's messages.
  */
 
+import { adminAuthService, type AdminAuthService, type AdminIdentity } from "../services/AdminAuth";
 import {
   sessionAuthService,
   timingSafeEqual,
@@ -30,6 +41,9 @@ const PUBLIC_EXACT = new Set([
 
 const PUBLIC_PREFIXES = ["/webhook/", "/ws/", "/swagger", "/api/health"];
 
+/** Routes served to platform admins, on an admin session and nothing else. */
+const ADMIN_PREFIX = "/api/admin/";
+
 /** Only `/api/` is gated; the gateway serves nothing else that needs a session. */
 const GUARDED_PREFIX = "/api/";
 
@@ -38,6 +52,7 @@ export interface AuthDecision {
   status?: number;
   error?: string;
   identity?: SessionIdentity;
+  admin?: AdminIdentity;
   /** True when the caller authenticated as a sibling service, not a user. */
   internal?: boolean;
 }
@@ -93,6 +108,10 @@ async function claimedBusinessIds(request: Request, url: URL): Promise<string[]>
   return claims;
 }
 
+export function isAdminPath(pathname: string): boolean {
+  return pathname.startsWith(ADMIN_PREFIX);
+}
+
 export function isPublicPath(pathname: string, method: string): boolean {
   // CORS preflight carries no Authorization header by design.
   if (method === "OPTIONS") return true;
@@ -123,12 +142,15 @@ const QUERY_TOKEN_PATHS = new Set(["/api/leads/stream"]);
  */
 export async function authorize(
   request: Request,
-  auth: SessionAuthService = sessionAuthService
+  auth: SessionAuthService = sessionAuthService,
+  admin: AdminAuthService = adminAuthService
 ): Promise<AuthDecision> {
   const url = new URL(request.url);
   const pathname = url.pathname;
 
   if (isPublicPath(pathname, request.method)) return { allow: true };
+
+  if (isAdminPath(pathname)) return await authorizeAdmin(request, pathname, admin);
 
   const internalToken = process.env.INTERNAL_SERVICE_TOKEN?.trim() ?? "";
   const presented = request.headers.get("x-internal-token")?.trim() ?? "";
@@ -156,6 +178,16 @@ export async function authorize(
 
   const identity = await auth.verify(token);
   if (!identity) {
+    // A valid admin token here is not an expired session, it is the wrong kind
+    // of session, and saying so stops the console from silently signing the
+    // admin out when a shared component calls a tenant endpoint.
+    if (await admin.verify(token)) {
+      return {
+        allow: false,
+        status: 403,
+        error: "Admin sessions cannot access business data"
+      };
+    }
     return { allow: false, status: 401, error: "Session is invalid or has expired" };
   }
 
@@ -172,4 +204,43 @@ export async function authorize(
   }
 
   return { allow: true, identity };
+}
+
+/**
+ * `/api/admin/` is a closed world: only an admin session opens it. Neither the
+ * internal service token nor a tenant session is accepted, because neither has
+ * any business reading the platform's billing data.
+ */
+async function authorizeAdmin(
+  request: Request,
+  pathname: string,
+  admin: AdminAuthService
+): Promise<AuthDecision> {
+  // Signing in is how you get a token, so it cannot itself require one.
+  if (pathname === "/api/admin/auth/login") return { allow: true };
+
+  if (!admin.configured) {
+    // Fail closed, exactly as the tenant gate does with AUTH_JWT_SECRET.
+    return {
+      allow: false,
+      status: 503,
+      error: "Admin authentication is not configured on this server"
+    };
+  }
+
+  const token = bearerToken(request.headers);
+  if (!token) {
+    return { allow: false, status: 401, error: "Admin authentication required" };
+  }
+
+  const identity = await admin.verify(token);
+  if (!identity) {
+    return {
+      allow: false,
+      status: 401,
+      error: "Admin session is invalid or has expired"
+    };
+  }
+
+  return { allow: true, admin: identity };
 }
