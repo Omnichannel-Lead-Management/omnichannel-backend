@@ -40,6 +40,13 @@ describe("agent registry unit", () => {
     expect(body.language_tag).toBe("english");
   });
 
+  test("every downstream agent forwards the customer's platform", () => {
+    for (const name of getDownstreamAgentNames()) {
+      const body = getAgent(name)!.buildRequest("hello", baseReq);
+      expect(body.platform).toBe("telegram");
+    }
+  });
+
   test("parseResponse marks escalated when downstream says so", () => {
     const agent = getAgent("lead_qualification");
     const parsed = agent!.parseResponse({

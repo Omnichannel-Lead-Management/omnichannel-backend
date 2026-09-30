@@ -200,6 +200,28 @@ describe("upsertLeadFromMessage", () => {
     expect(lead.score).toBeGreaterThan(0);
   });
 
+  test("POST /chat keeps the customer's platform and scores Telegram", async () => {
+    const { chatRoutes } = await import("../routes/chat.routes");
+    const res = await chatRoutes.handle(
+      new Request("http://localhost/chat", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          message: "can I get a quote?",
+          messenger_id: "tg_platform",
+          business_id: "biz_platform",
+          platform: "telegram"
+        })
+      })
+    );
+    const body = (await res.json()) as { leadId: string; leadScore: number };
+
+    const lead = getLead(body.leadId, "biz_platform")!;
+    expect(lead.platform).toBe("telegram");
+    expect(lead.source).toBe("telegram");
+    expect(body.leadScore).toBe(10); // +10 WhatsApp/Telegram rule
+  });
+
   test("a plain web enquiry still carries its interest text", () => {
     const lead = upsertLeadFromMessage({
       business_id: "biz_interest",

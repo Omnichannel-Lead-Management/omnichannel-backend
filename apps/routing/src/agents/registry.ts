@@ -103,6 +103,8 @@ export const agentRegistry: Record<string, AgentConfig> = {
         message: summary,
         messenger_id: req.messenger_id,
         business_id: req.business_id,
+        // Without this the chatbot records every lead it creates as "web".
+        platform: req.platform,
         language: resolveLanguageCode(req),
         language_tag: resolveLanguageTag(req),
         platform_capabilities: req.platform_capabilities ?? DEFAULT_CAPABILITIES,
@@ -143,6 +145,9 @@ export const agentRegistry: Record<string, AgentConfig> = {
         message: summary,
         messenger_id: req.messenger_id,
         business_id: req.business_id,
+        // Lead Manager uses this as the lead's platform and source, which
+        // decides the +10 WhatsApp/Telegram score; without it every lead is "web".
+        platform: req.platform,
         language: resolveLanguageCode(req),
         language_tag: resolveLanguageTag(req),
         platform_capabilities: req.platform_capabilities ?? DEFAULT_CAPABILITIES,
